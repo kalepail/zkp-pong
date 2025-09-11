@@ -9,9 +9,6 @@ pub const ONE: I = 1i128 << FRAC_BITS;
 pub fn to_fixed_int(n: I) -> I { n << FRAC_BITS }
 
 #[inline]
-pub fn from_fixed(x: I) -> i64 { (x >> FRAC_BITS) as i64 }
-
-#[inline]
 pub fn i_add(a: I, b: I) -> I { a.wrapping_add(b) }
 #[inline]
 pub fn i_sub(a: I, b: I) -> I { a.wrapping_sub(b) }
@@ -44,13 +41,22 @@ pub fn clamp_paddle_y(y: I, half: I, height: I) -> I {
     i_max(half, i_min(i_sub(height, half), y))
 }
 
-// Angles in radians in Q32.32
+// PI constant in Q32.32 (rounded)
+pub const PI_Q32: I = 13493037705i128;
+
+// Angles in radians in Q32.32 using integer-only math
 pub fn deg_to_rad_fixed(d: i32) -> I {
-    let rad = (d as f64) * core::f64::consts::PI / 180.0;
-    (rad * (1u128 << FRAC_BITS as u32) as f64).round() as i128
+    // rad = deg * PI / 180
+    let deg_fixed = to_fixed_int(d as i128);
+    let num = i_mul(deg_fixed, PI_Q32);
+    // divide by 180 (as fixed-int)
+    i_div(num, to_fixed_int(180))
 }
 
 pub fn deg_milli_to_rad_fixed(md: i32) -> I {
-    let rad = (md as f64) / 1000.0 * (core::f64::consts::PI / 180.0);
-    (rad * (1u128 << FRAC_BITS as u32) as f64).round() as i128
+    // md is thousandths of a degree: rad = (md/1000) * PI / 180
+    // Combine: rad = md * PI / (180000)
+    let md_fixed = to_fixed_int(md as i128);
+    let num = i_mul(md_fixed, PI_Q32);
+    i_div(num, to_fixed_int(180000))
 }

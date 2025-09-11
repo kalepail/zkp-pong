@@ -44,8 +44,8 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
 
     // Serve helper
     let mut state = serve(
-        1, // receiverDir = +1 to start, tStart = 0
-        0,
+        1, // receiverDir = +1 to start
+        to_fixed_int(0),
         width,
         height,
         serve_speed,
@@ -135,7 +135,7 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
             let receiver_dir = if moving_left { 1 } else { -1 };
             let mut next = serve(
                 receiver_dir,
-                from_fixed(state.t0) as i64,
+                state.t0,
                 width,
                 height,
                 serve_speed,
@@ -144,7 +144,6 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
             );
             next.left_y = state.left_y;
             next.right_y = state.right_y;
-            next.t0 = state.t0;
             state = next;
         }
     }

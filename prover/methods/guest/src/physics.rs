@@ -18,49 +18,32 @@ pub fn range_fixed(rng: &mut LcgRng, min_i: I, max_i: I) -> I {
     i_add(min_i, scaled as i128)
 }
 
-// CORDIC sin/cos in Q32.32 with ITER=32
+// CORDIC sin/cos in Q32.32 with ITER=32 (integer-only tables)
 const ITER: usize = 32;
-
-fn atan_table() -> [I; ITER] {
-    let mut t = [0i128; ITER];
-    for i in 0..ITER {
-        let ang = (2f64).powi(-(i as i32));
-        let v = ang.atan();
-        t[i] = (v * (1u128 << FRAC_BITS as u32) as f64).round() as i128;
-    }
-    t
-}
-
-fn k_gain() -> I {
-    let mut k = 1.0f64;
-    for i in 0..ITER { k *= 1.0 / (1.0 + (2f64).powi(-2 * i as i32)).sqrt(); }
-    (k * (1u128 << FRAC_BITS as u32) as f64).round() as i128
-}
+const ATAN_Q32: [I; ITER] = [
+    3373259426, 1991351318, 1052175346, 534100635, 268086748, 134174063, 67103403,
+    33553749, 16777131, 8388597, 4194303, 2097152, 1048576, 524288, 262144, 131072,
+    65536, 32768, 16384, 8192, 4096, 2048, 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2,
+];
+const K_Q32: I = 2608131496;
 
 pub fn cordic_sin_cos(angle: I) -> (I, I) {
-    // Precompute tables on first call
-    static mut ATAN: Option<[I; ITER]> = None;
-    static mut K: Option<I> = None;
-    unsafe {
-        if ATAN.is_none() { ATAN = Some(atan_table()); }
-        if K.is_none() { K = Some(k_gain()); }
-        let atan = ATAN.unwrap();
-        let mut x = K.unwrap();
-        let mut y: I = 0;
-        let mut z = angle;
-        for i in 0..ITER {
-            let di: I = if z >= 0 { 1 } else { -1 };
-            let shift = i as i32;
-            let x_shift = x >> shift;
-            let y_shift = y >> shift;
-            let x_new = i_sub(x, (di as i128 * y_shift as i128) as i128);
-            let y_new = i_add(y, (di as i128 * x_shift as i128) as i128);
-            x = x_new;
-            y = y_new;
-            z = i_sub(z, (di as i128 * atan[i] as i128) as i128);
-        }
-        (y, x)
+    let atan = ATAN_Q32;
+    let mut x = K_Q32;
+    let mut y: I = 0;
+    let mut z = angle;
+    for i in 0..ITER {
+        let di: I = if z >= 0 { 1 } else { -1 };
+        let shift = i as i32;
+        let x_shift = x >> shift;
+        let y_shift = y >> shift;
+        let x_new = i_sub(x, (di as i128 * y_shift as i128) as i128);
+        let y_new = i_add(y, (di as i128 * x_shift as i128) as i128);
+        x = x_new;
+        y = y_new;
+        z = i_sub(z, (di as i128 * atan[i] as i128) as i128);
     }
+    (y, x)
 }
 
 #[derive(Clone, Copy)]
@@ -78,7 +61,7 @@ pub struct FixState {
 
 pub fn serve(
     receiver_dir: i32,
-    t_start_secs: i64,
+    t0: I,
     width: I,
     height: I,
     serve_speed: I,
@@ -90,7 +73,7 @@ pub fn serve(
     let vx = i_mul(serve_speed, i_mul(cosv, to_fixed_int(receiver_dir as i128)));
     let vy = i_mul(serve_speed, sinv);
     FixState {
-        t0: to_fixed_int(t_start_secs as i128),
+        t0,
         x: i_div(width, to_fixed_int(2)),
         y: i_div(height, to_fixed_int(2)),
         vx,
@@ -128,5 +111,3 @@ pub fn bounce(
     let vy = i_mul(new_speed, sinv);
     (vx, vy, new_speed, new_dir)
 }
-
-// from_fixed available in fixed.rs
