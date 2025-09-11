@@ -55,8 +55,8 @@ startBtn.onclick = () => {
     maxBounceAngleDeg: 60,
     serveMaxAngleDeg: 20,
     pointsToWin: 3,
-    microJitterDeg: 0.8, // tiny randomness to avoid infinite rallies
-    aiOffsetMaxFrac: 0.6 // aim off-center up to 60% of half-height
+    microJitterMilliDeg: 800, // thousandths of a degree
+    aiOffsetMaxPermille: 600 // permille (per 1000) off-center
   })
 
   currentCancel = cancel
@@ -95,9 +95,9 @@ downloadBtn.onclick = () => {
     }
     const parsed = JSON.parse(text)
     const seed = parsed?.config?.seed ?? 'unknown'
-    const eventCount = Array.isArray(parsed?.events) ? parsed.events.length : 'n'
+    const eventCount = Array.isArray(parsed?.events) ? Math.floor(parsed.events.length / 2) : 'n'
     const fname = `pong-log_seed${seed}_events${eventCount}_${Date.now()}.json`
-    const blob = new Blob([JSON.stringify(parsed)], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify(parsed, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url

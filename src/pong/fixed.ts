@@ -7,8 +7,23 @@ export const FRAC_BITS = 32n
 export const ONE: I = 1n << FRAC_BITS
 
 export function toFixed(n: number): I {
-  // Round to nearest
+  // Round to nearest (may use float internally; not surfaced)
   return BigInt(Math.round(n * Math.pow(2, Number(FRAC_BITS))))
+}
+
+// Exact conversion from integer units to fixed
+export function toFixedInt(n: number | bigint): I {
+  return (BigInt(n) << FRAC_BITS) as I
+}
+
+// Divide a fixed-point by an integer
+export function iDivByInt(a: I, n: number | bigint): I {
+  return (a / BigInt(n)) as I
+}
+
+// Build a fixed-point from permille integer (0..1000)
+export function fixedFromPermille(p: number): I {
+  return ((BigInt(p) << FRAC_BITS) / 1000n) as I
 }
 
 export function fromFixed(x: I): number {
@@ -49,6 +64,11 @@ export function reflect1D(y0: I, vy: I, dt: I, minY: I, maxY: I): I {
 
 export function degToRadFixed(d: number): I {
   return toFixed((d * Math.PI) / 180)
+}
+
+// Milli-degree (thousandths of a degree) to radians in fixed
+export function degMilliToRadFixed(md: number): I {
+  return toFixed((md / 1000) * (Math.PI / 180))
 }
 
 // CORDIC-based sin/cos in Q32.32 for angles in radians (also Q32.32).

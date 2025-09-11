@@ -16,6 +16,8 @@ import {
   clampPaddleY as clampPaddleY_fixed,
   cordicSinCos,
   degToRadFixed,
+  degMilliToRadFixed,
+  fixedFromPermille,
 } from './fixed'
 
 type NumberLike = string | number
@@ -34,17 +36,17 @@ export interface GameConfig {
   maxBounceAngleDeg: number
   serveMaxAngleDeg: number
   pointsToWin: number
-  // New: micro jitter added to bounce angles (deg) to avoid infinite rallies
-  microJitterDeg: number
-  // New: AI aims off-center by up to this fraction of (paddleHalf + ballRadius)
-  aiOffsetMaxFrac: number
+  // Tiny jitter in thousandths of a degree (integer)
+  microJitterMilliDeg: number
+  // AI aims off-center by up to this permille of (paddleHalf + ballRadius) (integer 0..1000)
+  aiOffsetMaxPermille: number
 }
 
 export interface CompactLog {
   v: 1
   config: GameConfig
-  // Each entry is [leftY, rightY] at each paddle-plane event (hit or miss).
-  events: NumberLike[][]
+  // Flat array of paddle pairs per event: [l0, r0, l1, r1, ...]
+  events: NumberLike[]
 }
 
 export interface ValidateResult {
@@ -139,7 +141,7 @@ export function runGame(canvas: HTMLCanvasElement, cfg: GameConfig) {
   const speedIncrementI = toFixed(cfg.speedIncrement)
   const maxBounceAngleI = degToRadFixed(cfg.maxBounceAngleDeg)
   const serveMaxAngleI = degToRadFixed(cfg.serveMaxAngleDeg)
-  const microJitterI = degToRadFixed(cfg.microJitterDeg)
+  const microJitterI = degMilliToRadFixed(cfg.microJitterMilliDeg)
 
   const yMinI = ballRadiusI
   const yMaxI = iSub(heightI, ballRadiusI)
@@ -186,7 +188,11 @@ export function runGame(canvas: HTMLCanvasElement, cfg: GameConfig) {
     const tHitI = iAdd(fs.t0, dtToP)
     const yInterceptI = reflect1D_fixed(fs.y, fs.vy, iSub(tHitI, fs.t0), yMinI, yMaxI)
     const halfI = iDiv(paddleHeightI, toFixed(2))
-    const aimOffsetRatioI = rangeFixed(rngAI, -toFixed(cfg.aiOffsetMaxFrac), toFixed(cfg.aiOffsetMaxFrac))
+    const aimOffsetRatioI = rangeFixed(
+      rngAI,
+      -fixedFromPermille(cfg.aiOffsetMaxPermille),
+      fixedFromPermille(cfg.aiOffsetMaxPermille)
+    )
     const aimOffsetI = iMul(aimOffsetRatioI, iAdd(halfI, ballRadiusI))
     const desiredI = clampPaddleY_fixed(iAdd(yInterceptI, aimOffsetI), halfI, heightI)
     const movingLeftNext = fs.dir < 0
@@ -253,12 +259,13 @@ export function runGame(canvas: HTMLCanvasElement, cfg: GameConfig) {
     rightScore: 0,
     ended: false,
   }
+  // Debug log: use integer fixed-point string values (no floats)
   console.log('GAME serve ' + JSON.stringify({
-    receiverDir: state.dir,
-    t0: state.t0,
-    vx: state.vx,
-    vy: state.vy,
-    speed: state.speed,
+    receiverDir: fState.dir,
+    t0: fState.t0.toString(),
+    vx: fState.vx.toString(),
+    vy: fState.vy.toString(),
+    speed: fState.speed.toString(),
     leftScore: state.leftScore,
     rightScore: state.rightScore,
     rally: rallyId,
@@ -311,15 +318,15 @@ export function runGame(canvas: HTMLCanvasElement, cfg: GameConfig) {
 
     // Log both paddle positions at impact/miss time
     // Persist fixed-point integers as strings for exactness
-    log.events.push([leftYAtHitI.toString(), rightYAtHitI.toString()])
+    log.events.push(leftYAtHitI.toString(), rightYAtHitI.toString())
     console.log('GAME event ' + JSON.stringify({
-      idx: log.events.length - 1,
-      dir: state.dir,
-      tHit: fromFixed(tHitI),
-      dt: fromFixed(dtToPaddleI),
-      yAtHit,
-      leftYAtHit,
-      rightYAtHit,
+      idx: Math.floor(log.events.length / 2) - 1,
+      dir: fState.dir,
+      tHit: tHitI.toString(),
+      dt: dtToPaddleI.toString(),
+      yAtHit: yAtHitI.toString(),
+      leftYAtHit: leftYAtHitI.toString(),
+      rightYAtHit: rightYAtHitI.toString(),
       hit,
       rally: rallyId,
     }))
@@ -344,7 +351,13 @@ export function runGame(canvas: HTMLCanvasElement, cfg: GameConfig) {
       state.vy = fromFixed(fState.vy)
       state.speed = fromFixed(fState.speed)
       state.dir = fState.dir
-      console.log('GAME bounce ' + JSON.stringify({ angleRad: fromFixed(angleI), vx: state.vx, vy: state.vy, speed: state.speed, dir: state.dir }))
+      console.log('GAME bounce ' + JSON.stringify({
+        angleRad: angleI.toString(),
+        vx: fState.vx.toString(),
+        vy: fState.vy.toString(),
+        speed: fState.speed.toString(),
+        dir: fState.dir,
+      }))
       // Update state paddle positions for bookkeeping
       fState.leftY = toFixed(leftYAtHit)
       fState.rightY = toFixed(rightYAtHit)
@@ -384,11 +397,11 @@ export function runGame(canvas: HTMLCanvasElement, cfg: GameConfig) {
       }
       rallyId++
       console.log('GAME serve ' + JSON.stringify({
-        receiverDir: state.dir,
-        t0: state.t0,
-        vx: state.vx,
-        vy: state.vy,
-        speed: state.speed,
+        receiverDir: fState.dir,
+        t0: fState.t0.toString(),
+        vx: fState.vx.toString(),
+        vy: fState.vy.toString(),
+        speed: fState.speed.toString(),
         leftScore: state.leftScore,
         rightScore: state.rightScore,
         rally: rallyId,
@@ -505,7 +518,7 @@ export function validateLog(log: CompactLog): ValidateResult {
     const speedIncrementI = toFixed(cfg.speedIncrement)
     const maxBounceAngleI = degToRadFixed(cfg.maxBounceAngleDeg)
     const serveMaxAngleI = degToRadFixed(cfg.serveMaxAngleDeg)
-    const microJitterI = degToRadFixed(cfg.microJitterDeg)
+    const microJitterI = degMilliToRadFixed(cfg.microJitterMilliDeg)
 
     const yMinI = ballRadiusI
     const yMaxI = iSub(heightI, ballRadiusI)
@@ -550,14 +563,23 @@ export function validateLog(log: CompactLog): ValidateResult {
     let eventIdx = 0
 
     while (!ended) {
-      if (eventIdx >= log.events.length) break
+      // Each event is two entries (L, R)
+      const eventsLen = Array.isArray(log.events) ? log.events.length : 0
+      if (eventsLen % 2 !== 0) {
+        return { fair: false, reason: 'Malformed events length', leftScore, rightScore }
+      }
+      const eventCount = eventsLen / 2
+      if (eventIdx >= eventCount) break
       const dtToPaddle = timeToPaddle(state)
-      if (!(fromFixed(dtToPaddle) > 0 && isFinite(fromFixed(dtToPaddle)))) {
+      // dt must be positive; BigInt ensures finiteness
+      if (!(dtToPaddle > 0n)) {
         return { fair: false, reason: 'Invalid kinematics', leftScore, rightScore }
       }
       const tHit = iAdd(state.t0, dtToPaddle)
       const yAtHit = ballYat(state, fromFixed(tHit))
-      const [rawL, rawR] = log.events[eventIdx]
+      const yAtHitI = reflect1D_fixed(state.y, state.vy, dtToPaddle, yMinI, yMaxI)
+      const rawL = log.events[eventIdx * 2]
+      const rawR = log.events[eventIdx * 2 + 1]
       const loggedLI: I = typeof rawL === 'string' ? (BigInt(rawL) as unknown as I) : toFixed(rawL)
       const loggedRI: I = typeof rawR === 'string' ? (BigInt(rawR) as unknown as I) : toFixed(rawR)
       if ((typeof rawL !== 'number' && typeof rawL !== 'string') || (typeof rawR !== 'number' && typeof rawR !== 'string')) {
@@ -574,14 +596,14 @@ export function validateLog(log: CompactLog): ValidateResult {
         const detail = {
           idx: eventIdx,
           which,
-          dt: fromFixed(dtI),
-          maxDelta: fromFixed(maxDeltaI),
-          dL: fromFixed(dLI),
-          dR: fromFixed(dRI),
-          prevLeft: fromFixed(state.leftY),
-          prevRight: fromFixed(state.rightY),
-          loggedL: fromFixed(loggedLI),
-          loggedR: fromFixed(loggedRI),
+          dt: dtI.toString(),
+          maxDelta: maxDeltaI.toString(),
+          dL: dLI.toString(),
+          dR: dRI.toString(),
+          prevLeft: state.leftY.toString(),
+          prevRight: state.rightY.toString(),
+          loggedL: loggedLI.toString(),
+          loggedR: loggedRI.toString(),
         }
         return { fair: false, reason: 'Paddle moved too fast ' + JSON.stringify(detail), leftScore, rightScore }
       }
@@ -599,11 +621,11 @@ export function validateLog(log: CompactLog): ValidateResult {
       console.log('VALIDATE event ' + JSON.stringify({
         idx: eventIdx,
         dir: state.dir,
-        tHit: fromFixed(tHit),
-        dt: fromFixed(dtToPaddle),
-        yAtHit,
-        loggedL: fromFixed(loggedLI),
-        loggedR: fromFixed(loggedRI),
+        tHit: tHit.toString(),
+        dt: dtToPaddle.toString(),
+        yAtHit: yAtHitI.toString(),
+        loggedL: loggedLI.toString(),
+        loggedR: loggedRI.toString(),
         hit,
         rally: rallyId,
       }))
@@ -646,10 +668,10 @@ export function validateLog(log: CompactLog): ValidateResult {
         rallyId++
         console.log('VALIDATE serve ' + JSON.stringify({
           receiverDir: state.dir,
-          t0: fromFixed(state.t0),
-          vx: fromFixed(state.vx),
-          vy: fromFixed(state.vy),
-          speed: fromFixed(state.speed),
+          t0: state.t0.toString(),
+          vx: state.vx.toString(),
+          vy: state.vy.toString(),
+          speed: state.speed.toString(),
           leftScore,
           rightScore,
           rally: rallyId,

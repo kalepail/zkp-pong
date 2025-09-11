@@ -9,7 +9,8 @@ Guidelines within scope of the repo:
 
 - Logging contract:
   - Logs are compact JSON with `config` and `events` only.
-  - Each event logs `[leftY, rightY]` at every paddle hit or miss.
+  - `events` is a single flat array of integer fixed-point values (decimal strings), storing paddle pairs sequentially: `[l0, r0, l1, r1, ...]`.
+  - Each event contributes exactly two entries to `events`: leftY, then rightY.
   - No wall-bounce frames or timestamps are persisted; they are implied by physics + config + seed.
 
 - Validation:
@@ -27,6 +28,16 @@ Guidelines within scope of the repo:
 
 - Configuration:
   - Config fields must be codified into the log for perfect replay: board dimensions, paddle/ball sizes, speeds, speed increment, angle caps, and RNG seed.
-  - Also includes AI and stability knobs: `microJitterDeg` for tiny bounce-angle jitter and `aiOffsetMaxFrac` to bias AI aiming off-center. Jitter is applied identically in validation to maintain deterministic kinematics.
+  - AI and stability knobs are integer-only:
+    - `microJitterMilliDeg` (integer): tiny bounce-angle jitter in thousandths of a degree.
+    - `aiOffsetMaxPermille` (integer 0..1000): max off-center aim as a permille of `(paddleHalf + ballRadius)`.
+  - All config values are integers; do not introduce fractional fields.
 
-When extending the engine or validator, keep physics formulas bit-for-bit identical between gameplay and verification.
+- Integer Math Policy:
+  - Physics, simulation, and validation must use fixed-point integer math (Q32.32 via BigInt) for all kinematics and timings.
+  - Never persist or log floating-point values. Persisted `events` use integer fixed-point values encoded as decimal strings.
+  - Console/debug output must also print integer fixed-point values (decimal strings), not floats.
+  - Avoid float-based guard checks (e.g., `isFinite` on numbers) in core logic; use integer-domain checks instead (e.g., `dt > 0n`).
+  - Rendering may convert to JS numbers for canvas APIs, but these must never be persisted or shown in logs or validation reasons.
+
+When extending the engine or validator, keep physics formulas bit-for-bit identical between gameplay and verification, and adhere to the integer math policy above.
