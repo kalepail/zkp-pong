@@ -11,6 +11,7 @@ impl LcgRng {
 }
 
 // Uniform range in fixed: [min, max]
+#[inline(always)]
 pub fn range_fixed(rng: &mut LcgRng, min_i: I, max_i: I) -> I {
     let u = rng.next_u32() as u128; // 0..2^32-1
     let span = i_sub(max_i, min_i) as i128 as u128;
@@ -27,6 +28,7 @@ const ATAN_Q32: [I; ITER] = [
 ];
 const K_Q32: I = 2608131496;
 
+#[inline(always)]
 pub fn cordic_sin_cos(angle: I) -> (I, I) {
     let atan = ATAN_Q32;
     let mut x = K_Q32;
@@ -59,6 +61,7 @@ pub struct FixState {
     pub dir: i32, // -1 or +1
 }
 
+#[inline(always)]
 pub fn serve(
     receiver_dir: i32,
     t0: I,
@@ -85,17 +88,17 @@ pub fn serve(
     }
 }
 
+#[inline(always)]
 pub fn bounce(
     s: &FixState,
     paddle_y: I,
-    paddle_height: I,
+    half: I,
     ball_radius: I,
     max_bounce_angle: I,
     micro_jitter: I,
     speed_increment: I,
     rng: &mut LcgRng,
 ) -> (I, I, I, i32) {
-    let half = i_div(paddle_height, to_fixed_int(2));
     let limit = i_add(half, ball_radius);
     let mut offset = i_sub(s.y, paddle_y);
     if offset < i_sub(0, limit) { offset = i_sub(0, limit); }

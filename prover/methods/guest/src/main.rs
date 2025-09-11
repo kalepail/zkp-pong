@@ -38,6 +38,10 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
     let y_max = i_sub(height, ball_radius);
     let left_face = i_add(paddle_margin, paddle_width);
     let right_face = i_sub(width, i_add(paddle_margin, paddle_width));
+    let half = i_div(paddle_height, to_fixed_int(2));
+    let pad_ball = i_add(half, ball_radius);
+    let left_contact_x = i_add(left_face, ball_radius);
+    let right_contact_x = i_sub(right_face, ball_radius);
 
     // RNG seeded by config
     let mut rng = LcgRng::new(cfg.seed);
@@ -58,20 +62,15 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
     let mut ended = false;
 
     let events = &inp.events; // Vec<I>
-    assert!(events.len() % 2 == 0, "events must be pairs");
+    if events.len() % 2 != 0 { return ValidateLogOutput::invalid("events must be pairs"); }
 
-    let mut idx: usize = 0;
-    while !ended && idx < events.len() {
-        let l_i = events[idx];
-        let r_i = events[idx + 1];
-        idx += 2;
+    for pair in events.chunks_exact(2) {
+        if ended { break; }
+        let l_i = pair[0];
+        let r_i = pair[1];
 
         // Compute time to paddle plane
-        let target_x = if state.dir < 0 {
-            i_add(left_face, ball_radius)
-        } else {
-            i_sub(right_face, ball_radius)
-        };
+        let target_x = if state.dir < 0 { left_contact_x } else { right_contact_x };
         let dt_to_paddle = i_div(i_sub(target_x, state.x), state.vx);
         if !(dt_to_paddle > 0) {
             return ValidateLogOutput::invalid("Invalid kinematics");
@@ -88,7 +87,6 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
             return ValidateLogOutput::invalid("Paddle moved too fast");
         }
         // Bounds clamp check
-        let half = i_div(paddle_height, to_fixed_int(2));
         let clamp_l = clamp_paddle_y(l_i, half, height);
         let clamp_r = clamp_paddle_y(r_i, half, height);
         if clamp_l != l_i || clamp_r != r_i {
@@ -98,11 +96,10 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
         // Hit/miss in integer domain with cast only for comparison radius bounds
         let moving_left = state.dir < 0;
         let contact = if moving_left { l_i } else { r_i };
-        let pad_ball = i_add(half, ball_radius);
         let hit = i_abs(i_sub(contact, y_at_hit)) <= pad_ball;
 
         // Advance kinematics to t_hit
-        state.x = if moving_left { i_add(left_face, ball_radius) } else { i_sub(right_face, ball_radius) };
+        state.x = if moving_left { left_contact_x } else { right_contact_x };
         state.y = y_at_hit;
         state.t0 = t_hit;
         state.left_y = l_i;
@@ -114,7 +111,7 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
             let (vx, vy, speed, dir) = bounce(
                 &state,
                 contact_y,
-                paddle_height,
+                half,
                 ball_radius,
                 max_bounce_angle,
                 micro_jitter,
