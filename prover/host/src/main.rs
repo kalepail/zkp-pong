@@ -5,22 +5,23 @@ use risc0_zkvm::{default_prover, ExecutorEnv};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct GameConfig {
     seed: u32,
     width: i32,
     height: i32,
-    paddleHeight: i32,
-    paddleWidth: i32,
-    paddleMargin: i32,
-    ballRadius: i32,
-    paddleMaxSpeed: i32,
-    serveSpeed: i32,
-    speedIncrement: i32,
-    maxBounceAngleDeg: i32,
-    serveMaxAngleDeg: i32,
-    pointsToWin: u32,
-    microJitterMilliDeg: i32,
-    aiOffsetMaxPermille: i32,
+    paddle_height: i32,
+    paddle_width: i32,
+    paddle_margin: i32,
+    ball_radius: i32,
+    paddle_max_speed: i32,
+    serve_speed: i32,
+    speed_increment: i32,
+    max_bounce_angle_deg: i32,
+    serve_max_angle_deg: i32,
+    points_to_win: u32,
+    micro_jitter_milli_deg: i32,
+    ai_offset_max_permille: i32,
 }
 
 #[derive(Deserialize)]
@@ -71,51 +72,62 @@ fn main() {
         .with_env_filter(tracing_subscriber::filter::EnvFilter::from_default_env())
         .init();
 
-    // An executor environment describes the configurations for the zkVM
-    // including program inputs.
-    // A default ExecutorEnv can be created like so:
-    // `let env = ExecutorEnv::builder().build().unwrap();`
-    // However, this `env` does not have any inputs.
-    //
-    // To add guest input to the executor environment, use
-    // ExecutorEnvBuilder::write().
-    // To access this method, you'll need to use ExecutorEnv::builder(), which
-    // creates an ExecutorEnvBuilder. When you're done adding input, call
-    // ExecutorEnvBuilder::build().
-
-    // Load the compact log JSON (default file if no arg)
+    // Load the compact log JSON (argument required)
     let args: Vec<String> = std::env::args().collect();
-    let path = if args.len() > 1 { &args[1] } else { "../pong-log_seed930397884_events49_1757552715309.json" };
-    let raw = std::fs::read_to_string(path).expect("read log");
-    let log: CompactLog = serde_json::from_str(&raw).expect("parse log");
-    assert_eq!(log.v, 1, "log version");
+    if args.len() < 2 {
+        eprintln!("Usage: pong-prover <path-to-pong-log.json>");
+        eprintln!("Example: pong-prover pong-log_seed930397884_events49_1757552715309.json");
+        std::process::exit(1);
+    }
+
+    let path = &args[1];
+    let raw = std::fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("Error reading file '{}': {}", path, e);
+        std::process::exit(1);
+    });
+
+    let log: CompactLog = serde_json::from_str(&raw).unwrap_or_else(|e| {
+        eprintln!("Error parsing JSON: {}", e);
+        std::process::exit(1);
+    });
+
+    if log.v != 1 {
+        eprintln!("Unsupported log version: {}", log.v);
+        std::process::exit(1);
+    }
 
     let cfg = &log.config;
     let cfg_ints = ConfigInts {
         seed: cfg.seed,
         width: cfg.width,
         height: cfg.height,
-        paddle_height: cfg.paddleHeight,
-        paddle_width: cfg.paddleWidth,
-        paddle_margin: cfg.paddleMargin,
-        ball_radius: cfg.ballRadius,
-        paddle_max_speed: cfg.paddleMaxSpeed,
-        serve_speed: cfg.serveSpeed,
-        speed_increment: cfg.speedIncrement,
-        max_bounce_angle_deg: cfg.maxBounceAngleDeg,
-        serve_max_angle_deg: cfg.serveMaxAngleDeg,
-        points_to_win: cfg.pointsToWin,
-        micro_jitter_milli_deg: cfg.microJitterMilliDeg,
-        ai_offset_max_permille: cfg.aiOffsetMaxPermille,
+        paddle_height: cfg.paddle_height,
+        paddle_width: cfg.paddle_width,
+        paddle_margin: cfg.paddle_margin,
+        ball_radius: cfg.ball_radius,
+        paddle_max_speed: cfg.paddle_max_speed,
+        serve_speed: cfg.serve_speed,
+        speed_increment: cfg.speed_increment,
+        max_bounce_angle_deg: cfg.max_bounce_angle_deg,
+        serve_max_angle_deg: cfg.serve_max_angle_deg,
+        points_to_win: cfg.points_to_win,
+        micro_jitter_milli_deg: cfg.micro_jitter_milli_deg,
+        ai_offset_max_permille: cfg.ai_offset_max_permille,
     };
 
     // Convert events to i128 fixed-point integers from decimal strings
     let mut events: Vec<i128> = Vec::with_capacity(log.events.len());
     for s in log.events.iter() {
-        let v: i128 = s.parse().expect("event int parse");
+        let v: i128 = s.parse().unwrap_or_else(|e| {
+            eprintln!("Error parsing event '{}': {}", s, e);
+            std::process::exit(1);
+        });
         events.push(v);
     }
-    eprintln!("Loaded events: {}", events.len());
+
+    eprintln!("Loaded {} events from {}", events.len(), path);
+    eprintln!("Generating proof...");
+
     let input = ValidateLogInput { config: cfg_ints, events };
 
     let env = ExecutorEnv::builder()
@@ -125,28 +137,32 @@ fn main() {
         .unwrap();
 
     let prover = default_prover();
-    let prove_info = prover.prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF).unwrap();
+    let prove_info = prover.prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF).unwrap_or_else(|e| {
+        eprintln!("Proof generation failed: {}", e);
+        std::process::exit(1);
+    });
     let receipt = prove_info.receipt;
 
-    let out: ValidateLogOutput = receipt.journal.decode().unwrap();
-    if !out.fair {
-        println!(
-            "VALIDATED fair=false reason={} left={} right={} events={} hash=0x{}",
-            out.reason.unwrap_or_default(),
-            out.left_score,
-            out.right_score,
-            out.events_len,
-            hex::encode(out.log_hash_sha256)
-        );
-    } else {
-        println!(
-            "VALIDATED fair=true left={} right={} events={} hash=0x{}",
-            out.left_score,
-            out.right_score,
-            out.events_len,
-            hex::encode(out.log_hash_sha256)
-        );
-    }
+    eprintln!("Verifying proof...");
+    receipt.verify(GUEST_CODE_FOR_ZK_PROOF_ID).unwrap_or_else(|e| {
+        eprintln!("Proof verification failed: {}", e);
+        std::process::exit(1);
+    });
 
-    receipt.verify(GUEST_CODE_FOR_ZK_PROOF_ID).unwrap();
+    let out: ValidateLogOutput = receipt.journal.decode().unwrap();
+
+    if !out.fair {
+        eprintln!("\nProof verified successfully!");
+        eprintln!("Result: UNFAIR GAME");
+        eprintln!("Reason: {}", out.reason.unwrap_or_else(|| "Unknown".to_string()));
+        eprintln!("Log Hash: 0x{}", hex::encode(out.log_hash_sha256));
+        println!("UNFAIR");
+        std::process::exit(1);
+    } else {
+        eprintln!("\nProof verified successfully!");
+        eprintln!("Result: FAIR GAME");
+        eprintln!("Log Hash: 0x{}", hex::encode(out.log_hash_sha256));
+        eprintln!("Events Processed: {}", out.events_len);
+        println!("{}-{}", out.left_score, out.right_score);
+    }
 }

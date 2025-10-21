@@ -17,9 +17,69 @@ fn main() {
     env::commit(&out);
 }
 
+fn validate_config(cfg: &ConfigInts) -> Result<(), &'static str> {
+    // Dimension validation
+    if cfg.width <= 0 || cfg.width > 10000 {
+        return Err("Width must be positive and ≤10000");
+    }
+    if cfg.height <= 0 || cfg.height > 10000 {
+        return Err("Height must be positive and ≤10000");
+    }
+
+    // Paddle validation
+    if cfg.paddle_height <= 0 || cfg.paddle_height > cfg.height {
+        return Err("Paddle height must be positive and ≤ height");
+    }
+    if cfg.paddle_width <= 0 || cfg.paddle_width > 100 {
+        return Err("Paddle width must be positive and ≤100");
+    }
+    if cfg.paddle_margin < 0 || cfg.paddle_margin > cfg.width / 4 {
+        return Err("Paddle margin out of bounds");
+    }
+
+    // Ball validation
+    if cfg.ball_radius <= 0 || cfg.ball_radius > 50 {
+        return Err("Ball radius must be positive and ≤50");
+    }
+
+    // Speed validation - critical to prevent division by zero
+    if cfg.paddle_max_speed <= 0 || cfg.paddle_max_speed > 10000 {
+        return Err("Paddle max speed must be positive and ≤10000");
+    }
+    if cfg.serve_speed <= 0 || cfg.serve_speed > 10000 {
+        return Err("Serve speed must be positive and ≤10000");
+    }
+    if cfg.speed_increment < 0 || cfg.speed_increment > 1000 {
+        return Err("Speed increment must be non-negative and ≤1000");
+    }
+
+    // Angle validation
+    if cfg.max_bounce_angle_deg < 0 || cfg.max_bounce_angle_deg > 89 {
+        return Err("Max bounce angle must be 0-89 degrees");
+    }
+    if cfg.serve_max_angle_deg < 0 || cfg.serve_max_angle_deg > 45 {
+        return Err("Serve max angle must be 0-45 degrees");
+    }
+
+    // Game validation
+    if cfg.points_to_win == 0 || cfg.points_to_win > 1000 {
+        return Err("Points to win must be 1-1000");
+    }
+
+    // Jitter validation
+    if cfg.micro_jitter_milli_deg < 0 || cfg.micro_jitter_milli_deg > 10000 {
+        return Err("Jitter value out of range");
+    }
+
+    Ok(())
+}
+
 fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
-    // Build fixed-point constants from integer config
+    // Validate configuration first
     let cfg = &inp.config;
+    if let Err(msg) = validate_config(cfg) {
+        return ValidateLogOutput::invalid(msg);
+    }
 
     let width = to_fixed_int(cfg.width as i128);
     let height = to_fixed_int(cfg.height as i128);
@@ -35,13 +95,13 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
     let micro_jitter = deg_milli_to_rad_fixed(cfg.micro_jitter_milli_deg);
 
     let y_min = ball_radius;
-    let y_max = i_sub(height, ball_radius);
-    let left_face = i_add(paddle_margin, paddle_width);
-    let right_face = i_sub(width, i_add(paddle_margin, paddle_width));
+    let y_max = height - ball_radius;
+    let left_face = paddle_margin + paddle_width;
+    let right_face = width - (paddle_margin + paddle_width);
     let half = i_div(paddle_height, to_fixed_int(2));
-    let pad_ball = i_add(half, ball_radius);
-    let left_contact_x = i_add(left_face, ball_radius);
-    let right_contact_x = i_sub(right_face, ball_radius);
+    let pad_ball = half + ball_radius;
+    let left_contact_x = left_face + ball_radius;
+    let right_contact_x = right_face - ball_radius;
 
     // RNG seeded by config
     let mut rng = LcgRng::new(cfg.seed);
@@ -61,8 +121,19 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
     let mut right_score: u32 = 0;
     let mut ended = false;
 
+    // Event validation
     let events = &inp.events; // Vec<I>
-    if events.len() % 2 != 0 { return ValidateLogOutput::invalid("events must be pairs"); }
+    const MAX_EVENTS: usize = 10000; // ~5000 volleys max
+
+    if events.is_empty() {
+        return ValidateLogOutput::invalid("No events provided");
+    }
+    if events.len() > MAX_EVENTS {
+        return ValidateLogOutput::invalid("Too many events (max 10000)");
+    }
+    if events.len() % 2 != 0 {
+        return ValidateLogOutput::invalid("Events must be pairs");
+    }
 
     for pair in events.chunks_exact(2) {
         if ended { break; }
@@ -71,18 +142,33 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
 
         // Compute time to paddle plane
         let target_x = if state.dir < 0 { left_contact_x } else { right_contact_x };
-        let dt_to_paddle = i_div(i_sub(target_x, state.x), state.vx);
+
+        // Guard against division by zero (should be prevented by config validation)
+        if state.vx == 0 {
+            return ValidateLogOutput::invalid("Invalid velocity: vx is zero");
+        }
+
+        let dt_to_paddle = i_div(target_x - state.x, state.vx);
         if !(dt_to_paddle > 0) {
             return ValidateLogOutput::invalid("Invalid kinematics");
         }
-        let t_hit = i_add(state.t0, dt_to_paddle);
+
+        let t_hit = state.t0 + dt_to_paddle;
+
+        // Time overflow detection
+        // With Q32.32 format, max time is ~2^95 seconds (effectively unlimited for games)
+        // Event limit (10,000) ensures this check never triggers in practice
+        // Included for defense-in-depth and mathematical completeness
+        if t_hit < state.t0 {
+            return ValidateLogOutput::invalid("Time overflow detected");
+        }
         let y_at_hit = reflect1d(state.y, state.vy, dt_to_paddle, y_min, y_max);
 
         // Reachability
-        let dt = i_sub(t_hit, state.t0);
+        let dt = t_hit - state.t0;
         let max_delta = i_mul(paddle_max_speed, dt);
-        let d_l = i_abs(i_sub(l_i, state.left_y));
-        let d_r = i_abs(i_sub(r_i, state.right_y));
+        let d_l = i_abs(l_i - state.left_y);
+        let d_r = i_abs(r_i - state.right_y);
         if d_l > max_delta || d_r > max_delta {
             return ValidateLogOutput::invalid("Paddle moved too fast");
         }
@@ -96,7 +182,7 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
         // Hit/miss in integer domain with cast only for comparison radius bounds
         let moving_left = state.dir < 0;
         let contact = if moving_left { l_i } else { r_i };
-        let hit = i_abs(i_sub(contact, y_at_hit)) <= pad_ball;
+        let hit = i_abs(contact - y_at_hit) <= pad_ball;
 
         // Advance kinematics to t_hit
         state.x = if moving_left { left_contact_x } else { right_contact_x };

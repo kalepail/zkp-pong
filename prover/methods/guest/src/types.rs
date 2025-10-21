@@ -70,9 +70,9 @@ pub fn compute_log_hash(cfg: &ConfigInts, events: &Vec<I>) -> [u8; 32] {
     h.update(&cfg.points_to_win.to_le_bytes());
     h.update(&cfg.micro_jitter_milli_deg.to_le_bytes());
     h.update(&cfg.ai_offset_max_permille.to_le_bytes());
-    // Events as big-endian 16 bytes per I (i128)
+    // Events as little-endian 16 bytes per I (i128) - standardized for consistency
     for v in events.iter() {
-        h.update(&v.to_be_bytes());
+        h.update(&v.to_le_bytes());
     }
     let out = h.finalize();
     let mut arr = [0u8; 32];

@@ -1,111 +1,154 @@
-# RISC Zero Rust Starter Template
+# Pong Prover (RISC Zero)
 
-Welcome to the RISC Zero Rust Starter Template! This template is intended to
-give you a starting point for building a project using the RISC Zero zkVM.
-Throughout the template (including in this README), you'll find comments
-labelled `TODO` in places where you'll need to make changes. To better
-understand the concepts behind this template, check out the [zkVM
-Overview][zkvm-overview].
+Zero-knowledge proof generator and verifier for Pong match logs using RISC Zero zkVM.
 
-## Quick Start
+## Overview
 
-First, make sure [rustup] is installed. The
-[`rust-toolchain.toml`][rust-toolchain] file will be used by `cargo` to
-automatically install the correct version.
+This prover validates Pong match logs inside a RISC Zero zkVM environment, generating cryptographic proofs that a game was played fairly without revealing player strategies. The proof commits to a SHA-256 hash of the log, enabling trustless verification.
 
-To build all methods and execute the method within the zkVM, run the following
-command:
+## Architecture
 
+```
+prover/
+├── host/                   # Prover host program
+│   ├── src/main.rs        # CLI entry point, proof orchestration
+│   └── Cargo.toml
+├── methods/               # Guest code (runs in zkVM)
+│   ├── guest/
+│   │   ├── src/
+│   │   │   ├── main.rs    # zkVM entry point
+│   │   │   ├── physics.rs # Game physics validation
+│   │   │   ├── fixed.rs   # Fixed-point math (Q32.32)
+│   │   │   └── types.rs   # Data structures and hashing
+│   │   └── Cargo.toml
+│   ├── build.rs           # Guest build script (risc0-build)
+│   └── Cargo.toml
+├── Cargo.toml             # Workspace config
+└── rust-toolchain.toml    # Rust version pinning
+```
+
+## Requirements
+
+- Rust 1.81+ (specified in `rust-toolchain.toml`)
+- RISC Zero toolchain
+
+**Install RISC Zero:**
 ```bash
-cargo run
+curl -L https://risczero.com/install | bash
+rzup
 ```
 
-This is an empty template, and so there is no expected output (until you modify
-the code).
+## Building
 
-### Executing the Project Locally in Development Mode
-
-During development, faster iteration upon code changes can be achieved by leveraging [dev-mode], we strongly suggest activating it during your early development phase. Furthermore, you might want to get insights into the execution statistics of your project, and this can be achieved by specifying the environment variable `RUST_LOG="[executor]=info"` before running your project.
-
-Put together, the command to run your project in development mode while getting execution statistics is:
-
+**Development build (optimized):**
 ```bash
-RUST_LOG="[executor]=info" RISC0_DEV_MODE=1 cargo run
+cargo build --release
 ```
 
-### Running Proofs Remotely on Bonsai
+**Note:** The workspace is configured with `opt-level = 3` even in dev mode for acceptable proof generation performance.
 
-_Note: The Bonsai proving service is still in early Alpha; an API key is
-required for access. [Click here to request access][bonsai access]._
+## Usage
 
-If you have access to the URL and API key to Bonsai you can run your proofs
-remotely. To prove in Bonsai mode, invoke `cargo run` with two additional
-environment variables:
-
+**Generate and verify proof for a match log:**
 ```bash
-BONSAI_API_KEY="YOUR_API_KEY" BONSAI_API_URL="BONSAI_URL" cargo run
+cargo run --release -- <path-to-log.json>
 ```
 
-## How to Create a Project Based on This Template
-
-Search this template for the string `TODO`, and make the necessary changes to
-implement the required feature described by the `TODO` comment. Some of these
-changes will be complex, and so we have a number of instructional resources to
-assist you in learning how to write your own code for the RISC Zero zkVM:
-
-- The [RISC Zero Developer Docs][dev-docs] is a great place to get started.
-- Example projects are available in the [examples folder][examples] of
-  [`risc0`][risc0-repo] repository.
-- Reference documentation is available at [https://docs.rs][docs.rs], including
-  [`risc0-zkvm`][risc0-zkvm], [`cargo-risczero`][cargo-risczero],
-  [`risc0-build`][risc0-build], and [others][crates].
-
-## Directory Structure
-
-It is possible to organize the files for these components in various ways.
-However, in this starter template we use a standard directory structure for zkVM
-applications, which we think is a good starting point for your applications.
-
-```text
-project_name
-├── Cargo.toml
-├── host
-│   ├── Cargo.toml
-│   └── src
-│       └── main.rs                    <-- [Host code goes here]
-└── methods
-    ├── Cargo.toml
-    ├── build.rs
-    ├── guest
-    │   ├── Cargo.toml
-    │   └── src
-    │       └── method_name.rs         <-- [Guest code goes here]
-    └── src
-        └── lib.rs
+**Example:**
+```bash
+cargo run --release -- ../pong-log_seed930397884_events49_1757552715309.json
 ```
 
-## Video Tutorial
+**Output:**
+```
+Loaded 98 events from ../pong-log_seed930397884_events49_1757552715309.json
+Generating proof...
+Verifying proof...
 
-For a walk-through of how to build with this template, check out this [excerpt
-from our workshop at ZK HACK III][zkhack-iii].
+Proof verified successfully!
+Result: FAIR GAME
+Log Hash: 0x7a3f2b1c...
+Events Processed: 98
+3-0
+```
 
-## Questions, Feedback, and Collaborations
+## Development Mode
 
-We'd love to hear from you on [Discord][discord] or [Twitter][twitter].
+For faster iteration without actual proof generation:
+```bash
+RISC0_DEV_MODE=1 cargo run --release -- <log.json>
+```
 
-[bonsai access]: https://bonsai.xyz/apply
-[cargo-risczero]: https://docs.rs/cargo-risczero
-[crates]: https://github.com/risc0/risc0/blob/main/README.md#rust-binaries
-[dev-docs]: https://dev.risczero.com
-[dev-mode]: https://dev.risczero.com/api/generating-proofs/dev-mode
-[discord]: https://discord.gg/risczero
-[docs.rs]: https://docs.rs/releases/search?query=risc0
-[examples]: https://github.com/risc0/risc0/tree/main/examples
-[risc0-build]: https://docs.rs/risc0-build
-[risc0-repo]: https://www.github.com/risc0/risc0
-[risc0-zkvm]: https://docs.rs/risc0-zkvm
-[rust-toolchain]: rust-toolchain.toml
-[rustup]: https://rustup.rs
-[twitter]: https://twitter.com/risczero
-[zkhack-iii]: https://www.youtube.com/watch?v=Yg_BGqj_6lg&list=PLcPzhUaCxlCgig7ofeARMPwQ8vbuD6hC5&index=5
-[zkvm-overview]: https://dev.risczero.com/zkvm
+This skips cryptographic proof generation but still validates the log logic.
+
+## Testing
+
+Run unit tests for guest code:
+```bash
+cargo test
+```
+
+Run with dev mode for faster execution:
+```bash
+RISC0_DEV_MODE=1 cargo test
+```
+
+## How It Works
+
+### Host (`host/src/main.rs`)
+
+1. Loads match log JSON from file
+2. Parses config and events into `ValidateLogInput`
+3. Creates zkVM execution environment with input
+4. Generates proof using RISC Zero prover
+5. Verifies proof and decodes public output
+6. Prints result (fair/unfair, score, log hash)
+
+### Guest (`methods/guest/src/main.rs`)
+
+Runs inside RISC Zero zkVM:
+
+1. Reads `ValidateLogInput` from environment
+2. Validates game configuration bounds
+3. Initializes deterministic RNG with seed
+4. Replays match using fixed-point physics
+5. Checks each event for:
+   - Paddle reachability (max speed constraints)
+   - Paddle bounds (within field)
+   - Hit detection (ball-paddle collision)
+   - Physics consistency (deterministic bounces)
+6. Computes SHA-256 hash of config + events
+7. Commits public output: `ValidateLogOutput`
+
+### Public Output
+
+```rust
+struct ValidateLogOutput {
+    fair: bool,              // True if all checks passed
+    reason: Option<String>,  // Error message if unfair
+    left_score: u32,
+    right_score: u32,
+    events_len: u32,
+    log_hash_sha256: [u8; 32] // Binding commitment to input
+}
+```
+
+## Validation Rules
+
+1. **Config Validation**: Dimensions, speeds, angles within sane bounds
+2. **Kinematics**: Ball velocity must reach paddle plane in positive time
+3. **Reachability**: Paddle movement ≤ `max_speed * dt` between events
+4. **Bounds**: Paddles stay within field boundaries
+5. **Determinism**: Bounces computed using seed-based RNG and fixed-point math
+6. **Time Safety**: No overflow detection (protected by 10K event limit)
+
+## Performance
+
+Proof generation time varies by log size:
+- ~50 events (short match): 30-60 seconds
+- ~100 events (medium match): 60-120 seconds
+- Dev mode: <1 second (no proof)
+
+## License
+
+Apache License 2.0
