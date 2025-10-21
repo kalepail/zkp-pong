@@ -1,22 +1,6 @@
 {
   "v": 1,
-  "config": {
-    "seed": 237054789,
-    "width": 800,
-    "height": 480,
-    "paddleHeight": 80,
-    "paddleWidth": 10,
-    "paddleMargin": 16,
-    "ballRadius": 6,
-    "paddleMaxSpeed": 200,
-    "serveSpeed": 500,
-    "speedIncrement": 50,
-    "maxBounceAngleDeg": 60,
-    "serveMaxAngleDeg": 20,
-    "pointsToWin": 3,
-    "microJitterMilliDeg": 800,
-    "aiOffsetMaxPermille": 600
-  },
+  "seed": 237054789,
   "events": [
     "1030792151040",
     "926883114656",

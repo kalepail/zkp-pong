@@ -1,9 +1,11 @@
 use risc0_zkvm::guest::env;
 
+mod constants;
 mod fixed;
 mod physics;
 mod types;
 
+use crate::constants::*;
 use crate::fixed::*;
 use crate::physics::*;
 use crate::types::*;
@@ -17,82 +19,20 @@ fn main() {
     env::commit(&out);
 }
 
-fn validate_config(cfg: &ConfigInts) -> Result<(), &'static str> {
-    // Dimension validation
-    if cfg.width <= 0 || cfg.width > 10000 {
-        return Err("Width must be positive and ≤10000");
-    }
-    if cfg.height <= 0 || cfg.height > 10000 {
-        return Err("Height must be positive and ≤10000");
-    }
-
-    // Paddle validation
-    if cfg.paddle_height <= 0 || cfg.paddle_height > cfg.height {
-        return Err("Paddle height must be positive and ≤ height");
-    }
-    if cfg.paddle_width <= 0 || cfg.paddle_width > 100 {
-        return Err("Paddle width must be positive and ≤100");
-    }
-    if cfg.paddle_margin < 0 || cfg.paddle_margin > cfg.width / 4 {
-        return Err("Paddle margin out of bounds");
-    }
-
-    // Ball validation
-    if cfg.ball_radius <= 0 || cfg.ball_radius > 50 {
-        return Err("Ball radius must be positive and ≤50");
-    }
-
-    // Speed validation - critical to prevent division by zero
-    if cfg.paddle_max_speed <= 0 || cfg.paddle_max_speed > 10000 {
-        return Err("Paddle max speed must be positive and ≤10000");
-    }
-    if cfg.serve_speed <= 0 || cfg.serve_speed > 10000 {
-        return Err("Serve speed must be positive and ≤10000");
-    }
-    if cfg.speed_increment < 0 || cfg.speed_increment > 1000 {
-        return Err("Speed increment must be non-negative and ≤1000");
-    }
-
-    // Angle validation
-    if cfg.max_bounce_angle_deg < 0 || cfg.max_bounce_angle_deg > 89 {
-        return Err("Max bounce angle must be 0-89 degrees");
-    }
-    if cfg.serve_max_angle_deg < 0 || cfg.serve_max_angle_deg > 45 {
-        return Err("Serve max angle must be 0-45 degrees");
-    }
-
-    // Game validation
-    if cfg.points_to_win == 0 || cfg.points_to_win > 1000 {
-        return Err("Points to win must be 1-1000");
-    }
-
-    // Jitter validation
-    if cfg.micro_jitter_milli_deg < 0 || cfg.micro_jitter_milli_deg > 10000 {
-        return Err("Jitter value out of range");
-    }
-
-    Ok(())
-}
-
 fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
-    // Validate configuration first
-    let cfg = &inp.config;
-    if let Err(msg) = validate_config(cfg) {
-        return ValidateLogOutput::invalid(msg);
-    }
-
-    let width = to_fixed_int(cfg.width as i128);
-    let height = to_fixed_int(cfg.height as i128);
-    let ball_radius = to_fixed_int(cfg.ball_radius as i128);
-    let paddle_height = to_fixed_int(cfg.paddle_height as i128);
-    let paddle_width = to_fixed_int(cfg.paddle_width as i128);
-    let paddle_margin = to_fixed_int(cfg.paddle_margin as i128);
-    let paddle_max_speed = to_fixed_int(cfg.paddle_max_speed as i128);
-    let serve_speed = to_fixed_int(cfg.serve_speed as i128);
-    let speed_increment = to_fixed_int(cfg.speed_increment as i128);
-    let max_bounce_angle = deg_to_rad_fixed(cfg.max_bounce_angle_deg);
-    let serve_max_angle = deg_to_rad_fixed(cfg.serve_max_angle_deg);
-    let micro_jitter = deg_milli_to_rad_fixed(cfg.micro_jitter_milli_deg);
+    // Use hardcoded constants for all config values
+    let width = to_fixed_int(WIDTH as i128);
+    let height = to_fixed_int(HEIGHT as i128);
+    let ball_radius = to_fixed_int(BALL_RADIUS as i128);
+    let paddle_height = to_fixed_int(PADDLE_HEIGHT as i128);
+    let paddle_width = to_fixed_int(PADDLE_WIDTH as i128);
+    let paddle_margin = to_fixed_int(PADDLE_MARGIN as i128);
+    let paddle_max_speed = to_fixed_int(PADDLE_MAX_SPEED as i128);
+    let serve_speed = to_fixed_int(SERVE_SPEED as i128);
+    let speed_increment = to_fixed_int(SPEED_INCREMENT as i128);
+    let max_bounce_angle = deg_to_rad_fixed(MAX_BOUNCE_ANGLE_DEG);
+    let serve_max_angle = deg_to_rad_fixed(SERVE_MAX_ANGLE_DEG);
+    let micro_jitter = deg_milli_to_rad_fixed(MICRO_JITTER_MILLI_DEG);
 
     let y_min = ball_radius;
     let y_max = height - ball_radius;
@@ -103,12 +43,12 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
     let left_contact_x = left_face + ball_radius;
     let right_contact_x = right_face - ball_radius;
 
-    // RNG seeded by config
-    let mut rng = LcgRng::new(cfg.seed);
+    // RNG seeded by log input
+    let mut rng = LcgRng::new(inp.seed);
 
     // Serve helper
     let mut state = serve(
-        1, // receiverDir = +1 to start
+        INITIAL_SERVE_DIRECTION,
         to_fixed_int(0),
         width,
         height,
@@ -123,13 +63,12 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
 
     // Event validation
     let events = &inp.events; // Vec<I>
-    const MAX_EVENTS: usize = 10000; // ~5000 volleys max
 
     if events.is_empty() {
         return ValidateLogOutput::invalid("No events provided");
     }
-    if events.len() > MAX_EVENTS {
-        return ValidateLogOutput::invalid("Too many events (max 10000)");
+    if events.len() > MAX_EVENTS as usize {
+        return ValidateLogOutput::invalid("Too many events (exceeds MAX_EVENTS limit)");
     }
     if events.len() % 2 != 0 {
         return ValidateLogOutput::invalid("Events must be pairs");
@@ -210,7 +149,7 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
             state.dir = dir;
         } else {
             if moving_left { right_score += 1; } else { left_score += 1; }
-            if left_score >= cfg.points_to_win || right_score >= cfg.points_to_win {
+            if left_score >= POINTS_TO_WIN || right_score >= POINTS_TO_WIN {
                 ended = true;
                 break;
             }
@@ -231,7 +170,7 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
         }
     }
 
-    // Build commitment / hash of config + events for binding
-    let hash = compute_log_hash(cfg, events);
+    // Build commitment / hash of events for binding
+    let hash = compute_log_hash(events);
     ValidateLogOutput::ok(left_score, right_score, events.len() as u32, hash)
 }

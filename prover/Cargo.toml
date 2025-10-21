@@ -9,11 +9,11 @@ panic = "abort"
 
 # Optimized for RISC Zero zkVM proof generation performance
 [profile.release]
-opt-level = 3           # Maximum optimization for speed (not size)
+opt-level = 3
 overflow-checks = true
 debug = 0
 strip = "symbols"
 debug-assertions = false
 panic = "abort"
-codegen-units = 1       # Better optimization, slower compile
-lto = true
+codegen-units = 1
+lto = 'thin'

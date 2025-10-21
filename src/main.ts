@@ -41,23 +41,7 @@ startBtn.onclick = () => {
     currentCancel = null
   }
   const seed = Math.floor(Math.random() * 1e9) >>> 0
-  const { cancel, onUpdate, getLog } = runGame(canvas, {
-    seed,
-    width: canvas.width,
-    height: canvas.height,
-    paddleHeight: 80,
-    paddleWidth: 10,
-    paddleMargin: 16,
-    ballRadius: 6,
-    paddleMaxSpeed: 200, // px/s
-    serveSpeed: 500,     // px/s
-    speedIncrement: 50,  // per hit
-    maxBounceAngleDeg: 60,
-    serveMaxAngleDeg: 20,
-    pointsToWin: 3,
-    microJitterMilliDeg: 800, // thousandths of a degree
-    aiOffsetMaxPermille: 600 // permille (per 1000) off-center
-  })
+  const { cancel, onUpdate, getLog } = runGame(canvas, seed)
 
   currentCancel = cancel
   validateBtn.disabled = true
@@ -94,7 +78,7 @@ downloadBtn.onclick = () => {
       return
     }
     const parsed = JSON.parse(text)
-    const seed = parsed?.config?.seed ?? 'unknown'
+    const seed = parsed?.seed ?? 'unknown'
     const eventCount = Array.isArray(parsed?.events) ? Math.floor(parsed.events.length / 2) : 'n'
     const fname = `pong-log_seed${seed}_events${eventCount}_${Date.now()}.json`
     const blob = new Blob([JSON.stringify(parsed, null, 2)], { type: 'application/json' })

@@ -5,54 +5,15 @@ use risc0_zkvm::{default_prover, ExecutorEnv};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GameConfig {
-    seed: u32,
-    width: i32,
-    height: i32,
-    paddle_height: i32,
-    paddle_width: i32,
-    paddle_margin: i32,
-    ball_radius: i32,
-    paddle_max_speed: i32,
-    serve_speed: i32,
-    speed_increment: i32,
-    max_bounce_angle_deg: i32,
-    serve_max_angle_deg: i32,
-    points_to_win: u32,
-    micro_jitter_milli_deg: i32,
-    ai_offset_max_permille: i32,
-}
-
-#[derive(Deserialize)]
 struct CompactLog {
     v: u32,
-    config: GameConfig,
+    seed: u32,
     events: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
-struct ConfigInts {
-    seed: u32,
-    width: i32,
-    height: i32,
-    paddle_height: i32,
-    paddle_width: i32,
-    paddle_margin: i32,
-    ball_radius: i32,
-    paddle_max_speed: i32,
-    serve_speed: i32,
-    speed_increment: i32,
-    max_bounce_angle_deg: i32,
-    serve_max_angle_deg: i32,
-    points_to_win: u32,
-    micro_jitter_milli_deg: i32,
-    ai_offset_max_permille: i32,
-}
-
-#[derive(serde::Serialize)]
 struct ValidateLogInput {
-    config: ConfigInts,
+    seed: u32,
     events: Vec<i128>,
 }
 
@@ -81,6 +42,20 @@ fn main() {
     }
 
     let path = &args[1];
+
+    // Check file size before reading (DoS protection)
+    const MAX_LOG_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
+    let metadata = std::fs::metadata(path).unwrap_or_else(|e| {
+        eprintln!("Error accessing file '{}': {}", path, e);
+        std::process::exit(1);
+    });
+
+    if metadata.len() > MAX_LOG_SIZE {
+        eprintln!("Log file too large: {} bytes (max {} bytes)", metadata.len(), MAX_LOG_SIZE);
+        eprintln!("This may indicate a malformed or malicious file");
+        std::process::exit(1);
+    }
+
     let raw = std::fs::read_to_string(path).unwrap_or_else(|e| {
         eprintln!("Error reading file '{}': {}", path, e);
         std::process::exit(1);
@@ -96,25 +71,6 @@ fn main() {
         std::process::exit(1);
     }
 
-    let cfg = &log.config;
-    let cfg_ints = ConfigInts {
-        seed: cfg.seed,
-        width: cfg.width,
-        height: cfg.height,
-        paddle_height: cfg.paddle_height,
-        paddle_width: cfg.paddle_width,
-        paddle_margin: cfg.paddle_margin,
-        ball_radius: cfg.ball_radius,
-        paddle_max_speed: cfg.paddle_max_speed,
-        serve_speed: cfg.serve_speed,
-        speed_increment: cfg.speed_increment,
-        max_bounce_angle_deg: cfg.max_bounce_angle_deg,
-        serve_max_angle_deg: cfg.serve_max_angle_deg,
-        points_to_win: cfg.points_to_win,
-        micro_jitter_milli_deg: cfg.micro_jitter_milli_deg,
-        ai_offset_max_permille: cfg.ai_offset_max_permille,
-    };
-
     // Convert events to i128 fixed-point integers from decimal strings
     let mut events: Vec<i128> = Vec::with_capacity(log.events.len());
     for s in log.events.iter() {
@@ -125,10 +81,10 @@ fn main() {
         events.push(v);
     }
 
-    eprintln!("Loaded {} events from {}", events.len(), path);
+    eprintln!("Loaded {} events from {} (seed: {})", events.len(), path, log.seed);
     eprintln!("Generating proof...");
 
-    let input = ValidateLogInput { config: cfg_ints, events };
+    let input = ValidateLogInput { seed: log.seed, events };
 
     let env = ExecutorEnv::builder()
         .write(&input)

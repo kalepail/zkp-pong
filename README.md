@@ -31,7 +31,7 @@ This project demonstrates provably fair game mechanics using zero-knowledge proo
 
 **Requirements:**
 - Node.js 18+
-- pnpm (or npm)
+- pnpm
 
 **Start development server:**
 ```bash
@@ -61,8 +61,8 @@ pnpm preview
 Logs are JSON files containing:
 - `config`: Game parameters (seed, dimensions, speeds, angles, etc.)
 - `events`: Flat array of paddle positions `[leftY0, rightY0, leftY1, rightY1, ...]`
-
-Example: `pong-log_seed930397884_events49_1757552715309.json`
+  - Each volley = 2 events (leftY, rightY)
+  - Example: 49 volleys = 98 events in `pong-log_seed930397884_events49_*.json`
 
 ### Game Controls
 
@@ -83,6 +83,20 @@ const result = validateLog(log)
 
 **Zero-knowledge proof (Rust):**
 See [prover/README.md](./prover/README.md) for RISC Zero zkVM verification.
+
+## Testing
+
+```bash
+pnpm test              # Run all 24 tests
+pnpm test:watch        # Watch mode
+```
+
+Test suite includes:
+- Constant verification (TypeScript ↔ Rust alignment)
+- Real game log validation (3 actual matches)
+- Edge cases and determinism checks
+
+See [TESTING.md](./TESTING.md) for details.
 
 ## License
 

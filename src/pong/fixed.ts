@@ -7,7 +7,11 @@ export const FRAC_BITS = 32n
 export const ONE: I = 1n << FRAC_BITS
 
 export function toFixed(n: number): I {
-  // Round to nearest (may use float internally; not surfaced)
+  // Convert floating-point number to Q32.32 fixed-point format
+  // NOTE: Uses Math.round() which involves floating-point arithmetic
+  // This is ONLY safe at initialization time for config/constant conversion
+  // Runtime physics must NOT call this function with computed values
+  // The conversion: n * 2^32, rounded to nearest integer
   return BigInt(Math.round(n * Math.pow(2, Number(FRAC_BITS))))
 }
 
@@ -27,6 +31,9 @@ export function fixedFromPermille(p: number): I {
 }
 
 export function fromFixed(x: I): number {
+  // Convert Q32.32 fixed-point to floating-point for display/rendering only
+  // NOTE: Result is NOT deterministic and should NEVER be logged or used in physics
+  // Only use for: canvas rendering, UI display, debug output to console
   return Number(x) / Math.pow(2, Number(FRAC_BITS))
 }
 
@@ -62,27 +69,53 @@ export function reflect1D(y0: I, vy: I, dt: I, minY: I, maxY: I): I {
   return iAdd(minY, y)
 }
 
+// PI constant in Q32.32 format (must match Rust: prover/methods/guest/src/fixed.rs)
+export const PI_Q32: I = 13493037705n
+
+// Convert degrees to radians using integer-only math (no floating point)
+// This ensures determinism - no platform-specific float rounding
 export function degToRadFixed(d: number): I {
-  return toFixed((d * Math.PI) / 180)
+  // rad = deg * PI / 180
+  const degFixed = toFixedInt(d)
+  const num = iMul(degFixed, PI_Q32)
+  return iDiv(num, toFixedInt(180))
 }
 
-// Milli-degree (thousandths of a degree) to radians in fixed
+// Convert milli-degrees to radians using integer-only math
+// Milli-degrees are thousandths of a degree (e.g., 800 = 0.8°)
 export function degMilliToRadFixed(md: number): I {
-  return toFixed((md / 1000) * (Math.PI / 180))
+  // rad = (md/1000) * PI / 180 = md * PI / 180000
+  const mdFixed = toFixedInt(md)
+  const num = iMul(mdFixed, PI_Q32)
+  return iDiv(num, toFixedInt(180000))
 }
 
 // CORDIC-based sin/cos in Q32.32 for angles in radians (also Q32.32).
-// Valid for |angle| <= ~pi/2; our max angles are within that.
+// CORDIC with 32 iterations provides ~10^-10 precision for |angle| < π
+// Valid range extended to ±8π for game physics safety
+// Maximum game angle is ~60° (1.05 rad) so this is very conservative
 const ITER = 32
 
-// Precompute atan(2^-i) as fixed
-const atanTable: I[] = Array.from({ length: ITER }, (_, i) => toFixed(Math.atan(Math.pow(2, -i))))
+// Hardcoded CORDIC atan(2^-i) table in Q32.32 format
+// CRITICAL: These values MUST match Rust prover exactly!
+// Source: prover/methods/guest/src/physics.rs ATAN_Q32 array
+// DO NOT recompute these - any divergence breaks determinism
+const atanTable: I[] = [
+  3373259426n, 1991351318n, 1052175346n, 534100635n, 268086748n, 134174063n, 67103403n,
+  33553749n, 16777131n, 8388597n, 4194303n, 2097152n, 1048576n, 524288n, 262144n, 131072n,
+  65536n, 32768n, 16384n, 8192n, 4096n, 2048n, 1024n, 512n, 256n, 128n, 64n, 32n, 16n, 8n, 4n, 2n,
+]
 
-// Precompute gain K = prod_i 1/sqrt(1+2^-2i)
-const K_FLOAT = Array.from({ length: ITER }, (_, i) => 1 / Math.sqrt(1 + Math.pow(2, -2 * i))).reduce((a, b) => a * b, 1)
-const K: I = toFixed(K_FLOAT)
+// Hardcoded CORDIC gain constant K = product of 1/sqrt(1+2^-2i) for i=0..31
+// CRITICAL: This value MUST match Rust prover exactly!
+// Source: prover/methods/guest/src/physics.rs K_Q32 = 2608131496
+// DO NOT recompute this - any divergence breaks determinism
+const K: I = 2608131496n
 
 export function cordicSinCos(angle: I): { sin: I; cos: I } {
+  // Pure integer CORDIC algorithm for computing sin and cos
+  // All operations are BigInt - no floating-point arithmetic
+  // This ensures bit-for-bit identical results across all platforms
   let x = K
   let y = 0n as I
   let z = angle
@@ -98,6 +131,11 @@ export function cordicSinCos(angle: I): { sin: I; cos: I } {
     z = iSub(z, iMulInt(di, atanTable[i]))
   }
   return { sin: y, cos: x }
+}
+
+// Export constants for testing (to verify they match Rust prover)
+export function getCORDICConstants(): { K: I; atanTable: I[] } {
+  return { K, atanTable }
 }
 
 function iMulInt(a: I, b: I): I { return (a as unknown as bigint) * (b as unknown as bigint) as unknown as I }

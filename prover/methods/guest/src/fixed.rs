@@ -1,4 +1,27 @@
 // Q32.32 fixed-point arithmetic using i128
+//
+// ## Format Specification
+// - Type: i128 (128-bit signed integer)
+// - Fractional bits: 32 (lower 32 bits)
+// - Integer bits: 96 (upper 96 bits, including sign)
+// - One unit: 1 << 32 = 4,294,967,296
+//
+// ## Value Ranges
+// - Theoretical max: ±2^95 (~3.96 × 10^28)
+// - Conservative safe limit: ±2^63 (~9.22 × 10^18)
+// - Practical game values: max ~2^42 (~4.40 × 10^12)
+//   - Example: 10,000 pixels << 32 = 4.29 × 10^13
+//
+// ## Overflow Protection
+// - Multiplication checks operands don't exceed 2^63
+// - Division uses checked_shl to detect overflow
+// - Addition/subtraction rely on Cargo.toml overflow-checks=true
+// - CORDIC iterations use checked_mul for safety
+//
+// ## Determinism Guarantee
+// All operations are pure integer arithmetic with no floating-point.
+// This ensures bit-for-bit identical results across all platforms,
+// which is critical for zero-knowledge proof validation.
 
 pub type I = i128;
 
@@ -72,6 +95,8 @@ pub fn i_div(a: I, b: I) -> I {
 
 // Reflection on [min_y, max_y]
 // Simulates ball bouncing between boundaries using modular arithmetic
+// Uses double-modulo approach for mathematically clean negative handling
+// Matches TypeScript implementation exactly
 #[inline(always)]
 pub fn reflect1d(y0: I, vy: I, dt: I, min_y: I, max_y: I) -> I {
     let span = max_y - min_y;
@@ -86,9 +111,10 @@ pub fn reflect1d(y0: I, vy: I, dt: I, min_y: I, max_y: I) -> I {
     let period = span << 1; // 2*span
     let mut y = y0 + i_mul(vy, dt) - min_y;
 
-    // Modulo operation - needs to handle negatives properly
-    y = y % period;
-    if y < 0 { y = y + period; }
+    // Double-modulo for proper negative handling (matches TypeScript)
+    // ((y % period) + period) % period
+    y = ((y % period) + period) % period;
+
     if y > span { return max_y - (y - span); }
     min_y + y
 }
@@ -117,4 +143,13 @@ pub fn deg_milli_to_rad_fixed(md: i32) -> I {
     let md_fixed = to_fixed_int(md as i128);
     let num = i_mul(md_fixed, PI_Q32);
     i_div(num, to_fixed_int(180000))
+}
+
+// Build a fixed-point from permille integer (0..1000)
+// Matches TypeScript fixedFromPermille() in src/pong/fixed.ts
+#[inline(always)]
+pub fn fixed_from_permille(p: i32) -> I {
+    // permille = parts per thousand
+    // Convert to Q32.32: (p << 32) / 1000
+    ((p as i128) << FRAC_BITS) / 1000
 }

@@ -1,32 +1,12 @@
-#![allow(unused)]
 use serde::{Deserialize, Serialize};
 use std::vec::Vec;
-use std::string::{String, ToString};
+use std::string::String;
 
 use crate::fixed::I;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct ConfigInts {
-    pub seed: u32,
-    pub width: i32,
-    pub height: i32,
-    pub paddle_height: i32,
-    pub paddle_width: i32,
-    pub paddle_margin: i32,
-    pub ball_radius: i32,
-    pub paddle_max_speed: i32,
-    pub serve_speed: i32,
-    pub speed_increment: i32,
-    pub max_bounce_angle_deg: i32,
-    pub serve_max_angle_deg: i32,
-    pub points_to_win: u32,
-    pub micro_jitter_milli_deg: i32,
-    pub ai_offset_max_permille: i32,
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct ValidateLogInput {
-    pub config: ConfigInts,
+    pub seed: u32,
     pub events: Vec<I>,
 }
 
@@ -51,29 +31,25 @@ impl ValidateLogOutput {
 
 use sha2::{Digest, Sha256};
 
-pub fn compute_log_hash(cfg: &ConfigInts, events: &Vec<I>) -> [u8; 32] {
+pub fn compute_log_hash(events: &Vec<I>) -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(b"PONGLOGv1");
-    // Config in canonical order
-    h.update(&cfg.seed.to_le_bytes());
-    h.update(&cfg.width.to_le_bytes());
-    h.update(&cfg.height.to_le_bytes());
-    h.update(&cfg.paddle_height.to_le_bytes());
-    h.update(&cfg.paddle_width.to_le_bytes());
-    h.update(&cfg.paddle_margin.to_le_bytes());
-    h.update(&cfg.ball_radius.to_le_bytes());
-    h.update(&cfg.paddle_max_speed.to_le_bytes());
-    h.update(&cfg.serve_speed.to_le_bytes());
-    h.update(&cfg.speed_increment.to_le_bytes());
-    h.update(&cfg.max_bounce_angle_deg.to_le_bytes());
-    h.update(&cfg.serve_max_angle_deg.to_le_bytes());
-    h.update(&cfg.points_to_win.to_le_bytes());
-    h.update(&cfg.micro_jitter_milli_deg.to_le_bytes());
-    h.update(&cfg.ai_offset_max_permille.to_le_bytes());
-    // Events as little-endian 16 bytes per I (i128) - standardized for consistency
+
+    // Build buffer for batch hashing (more efficient with SHA-256 accelerator)
+    // Version prefix: 9 bytes
+    // Events: variable length
+    let mut buf = Vec::with_capacity(9 + events.len() * 16);
+
+    // Version prefix
+    buf.extend_from_slice(b"PONGLOGv1");
+
+    // Events as little-endian 16 bytes per I (i128)
     for v in events.iter() {
-        h.update(&v.to_le_bytes());
+        buf.extend_from_slice(&v.to_le_bytes());
     }
+
+    // Single batch update (optimal for SHA-256 accelerator)
+    h.update(&buf);
+
     let out = h.finalize();
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&out);
