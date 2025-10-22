@@ -1,31 +1,5 @@
 use crate::fixed::*;
 
-// Simple LCG matching TS engine
-// NOTE: Seed 0 is automatically converted to 1 to match JavaScript implementation
-// This ensures the RNG never starts in a degenerate state
-pub struct LcgRng { state: u32 }
-impl LcgRng {
-    pub fn new(seed: u32) -> Self {
-        Self { state: if seed == 0 { 1 } else { seed } }
-    }
-    pub fn next_u32(&mut self) -> u32 {
-        self.state = self.state.wrapping_mul(1664525).wrapping_add(1013904223);
-        self.state
-    }
-}
-
-// Uniform range in fixed: [min, max]
-#[inline(always)]
-pub fn range_fixed(rng: &mut LcgRng, min_i: I, max_i: I) -> I {
-    // Production assertion: validate range in all builds
-    assert!(max_i >= min_i, "range_fixed: invalid range (min > max)");
-
-    let u = rng.next_u32() as u128; // 0..2^32-1
-    let span = (max_i - min_i) as i128 as u128;
-    let scaled = (span * u) >> 32; // divide by 2^32
-    min_i + (scaled as i128)
-}
-
 // CORDIC sin/cos in Q32.32 with ITER=32 (integer-only tables)
 const ITER: usize = 32;
 const ATAN_Q32: [I; ITER] = [
@@ -92,10 +66,14 @@ pub fn serve(
     width: I,
     height: I,
     serve_speed: I,
-    serve_max_angle: I,
-    rng: &mut LcgRng,
+    max_bounce_angle_deg: i32,
+    angle_range: i32,
+    serve_angle_multiplier: i32,
+    volley_count: u32,
 ) -> FixState {
-    let angle = range_fixed(rng, -serve_max_angle, serve_max_angle);
+    // Calculate deterministic serve angle based on volley count
+    let angle_raw = ((volley_count as i32 * serve_angle_multiplier) % angle_range) - max_bounce_angle_deg;
+    let angle = deg_to_rad_fixed(angle_raw);
     let (sinv, cosv) = cordic_sin_cos(angle);
     let vx = i_mul(serve_speed, i_mul(cosv, to_fixed_int(receiver_dir as i128)));
     let vy = i_mul(serve_speed, sinv);
@@ -119,9 +97,7 @@ pub fn bounce(
     half: I,
     ball_radius: I,
     max_bounce_angle: I,
-    micro_jitter: I,
     speed_increment: I,
-    rng: &mut LcgRng,
 ) -> (I, I, I, i32) {
     let limit = half + ball_radius;
 
@@ -135,10 +111,7 @@ pub fn bounce(
     if offset > limit { offset = limit; }
 
     let norm = i_div(offset, limit);
-    let mut angle = i_max(-max_bounce_angle, i_min(max_bounce_angle, i_mul(norm, max_bounce_angle)));
-
-    let jitter = range_fixed(rng, -micro_jitter, micro_jitter);
-    angle = i_max(-max_bounce_angle, i_min(max_bounce_angle, angle + jitter));
+    let angle = i_max(-max_bounce_angle, i_min(max_bounce_angle, i_mul(norm, max_bounce_angle)));
 
     let new_speed = s.speed + speed_increment;
     let new_dir = if s.dir < 0 { 1 } else { -1 };

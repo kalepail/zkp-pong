@@ -6,7 +6,6 @@ use crate::fixed::I;
 
 #[derive(Serialize, Deserialize)]
 pub struct ValidateLogInput {
-    pub seed: u32,
     pub events: Vec<I>,
 }
 

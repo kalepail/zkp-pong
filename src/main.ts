@@ -40,8 +40,7 @@ startBtn.onclick = () => {
     currentCancel()
     currentCancel = null
   }
-  const seed = Math.floor(Math.random() * 1e9) >>> 0
-  const { cancel, onUpdate, getLog } = runGame(canvas, seed)
+  const { cancel, onUpdate, getLog } = runGame(canvas)
 
   currentCancel = cancel
   validateBtn.disabled = true
@@ -78,9 +77,8 @@ downloadBtn.onclick = () => {
       return
     }
     const parsed = JSON.parse(text)
-    const seed = parsed?.seed ?? 'unknown'
     const eventCount = Array.isArray(parsed?.events) ? Math.floor(parsed.events.length / 2) : 'n'
-    const fname = `pong-log_seed${seed}_events${eventCount}_${Date.now()}.json`
+    const fname = `pong-log_events${eventCount}_${Date.now()}.json`
     const blob = new Blob([JSON.stringify(parsed, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

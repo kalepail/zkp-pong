@@ -7,13 +7,11 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 struct CompactLog {
     v: u32,
-    seed: u32,
     events: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
 struct ValidateLogInput {
-    seed: u32,
     events: Vec<i128>,
 }
 
@@ -81,10 +79,10 @@ fn main() {
         events.push(v);
     }
 
-    eprintln!("Loaded {} events from {} (seed: {})", events.len(), path, log.seed);
+    eprintln!("Loaded {} events from {}", events.len(), path);
     eprintln!("Generating proof...");
 
-    let input = ValidateLogInput { seed: log.seed, events };
+    let input = ValidateLogInput { events };
 
     let env = ExecutorEnv::builder()
         .write(&input)

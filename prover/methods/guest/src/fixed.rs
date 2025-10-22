@@ -31,12 +31,14 @@ pub const FRAC_BITS: i32 = 32;
 pub fn to_fixed_int(n: I) -> I { n << FRAC_BITS }
 
 #[inline(always)]
+#[allow(dead_code)]
 pub fn i_add(a: I, b: I) -> I {
     // With overflow-checks=true in Cargo.toml, this will panic on overflow
     a + b
 }
 
 #[inline(always)]
+#[allow(dead_code)]
 pub fn i_sub(a: I, b: I) -> I {
     // With overflow-checks=true in Cargo.toml, this will panic on overflow
     a - b
@@ -134,22 +136,4 @@ pub fn deg_to_rad_fixed(d: i32) -> I {
     let num = i_mul(deg_fixed, PI_Q32);
     // divide by 180 (as fixed-int)
     i_div(num, to_fixed_int(180))
-}
-
-#[inline(always)]
-pub fn deg_milli_to_rad_fixed(md: i32) -> I {
-    // md is thousandths of a degree: rad = (md/1000) * PI / 180
-    // Combine: rad = md * PI / (180000)
-    let md_fixed = to_fixed_int(md as i128);
-    let num = i_mul(md_fixed, PI_Q32);
-    i_div(num, to_fixed_int(180000))
-}
-
-// Build a fixed-point from permille integer (0..1000)
-// Matches TypeScript fixedFromPermille() in src/pong/fixed.ts
-#[inline(always)]
-pub fn fixed_from_permille(p: i32) -> I {
-    // permille = parts per thousand
-    // Convert to Q32.32: (p << 32) / 1000
-    ((p as i128) << FRAC_BITS) / 1000
 }

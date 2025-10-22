@@ -1,17 +1,11 @@
+// Unit tests for RISC0 zkVM prover validation logic
+// Tests that rely on specific JSON log files are in log_validation_test.rs
 use methods::{GUEST_CODE_FOR_ZK_PROOF_ELF, GUEST_CODE_FOR_ZK_PROOF_ID};
 use risc0_zkvm::{default_prover, ExecutorEnv};
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize)]
-struct CompactLog {
-    v: u32,
-    seed: u32,
-    events: Vec<String>,
-}
-
 #[derive(Serialize)]
 struct ValidateLogInput {
-    seed: u32,
     events: Vec<i128>,
 }
 
@@ -19,139 +13,21 @@ struct ValidateLogInput {
 struct ValidateLogOutput {
     fair: bool,
     reason: Option<String>,
+    #[allow(dead_code)]
     left_score: u32,
+    #[allow(dead_code)]
     right_score: u32,
+    #[allow(dead_code)]
     events_len: u32,
+    #[allow(dead_code)]
     log_hash_sha256: [u8; 32],
 }
 
-fn load_and_parse_log(path: &str) -> (u32, Vec<i128>) {
-    let raw = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("Failed to read {}: {}", path, e));
-
-    let log: CompactLog = serde_json::from_str(&raw)
-        .unwrap_or_else(|e| panic!("Failed to parse {}: {}", path, e));
-
-    assert_eq!(log.v, 1, "Unsupported log version: {}", log.v);
-
-    let events: Vec<i128> = log
-        .events
-        .iter()
-        .map(|s| {
-            s.parse::<i128>()
-                .unwrap_or_else(|e| panic!("Failed to parse event '{}': {}", s, e))
-        })
-        .collect();
-
-    (log.seed, events)
-}
-
-#[test]
-fn test_valid_game_seed930397884() {
-    let (seed, events) = load_and_parse_log("../../pong-log_seed930397884_events49_1757552715309.json");
-
-    let input = ValidateLogInput { seed, events };
-
-    // Build ExecutorEnv with input data
-    let env = ExecutorEnv::builder()
-        .write(&input)
-        .unwrap()
-        .build()
-        .unwrap();
-
-    // Generate proof
-    let prover = default_prover();
-    let prove_info = prover
-        .prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF)
-        .expect("Failed to generate proof");
-
-    let receipt = prove_info.receipt;
-
-    // Verify the receipt
-    receipt
-        .verify(GUEST_CODE_FOR_ZK_PROOF_ID)
-        .expect("Receipt verification failed");
-
-    // Decode and verify output
-    let output: ValidateLogOutput = receipt.journal.decode().expect("Failed to decode journal");
-
-    assert!(output.fair, "Game should be fair");
-    assert_eq!(output.left_score, 3, "Expected left score 3");
-    assert_eq!(output.right_score, 0, "Expected right score 0");
-    assert_eq!(output.events_len, 98, "Expected 98 events");
-    assert!(output.reason.is_none(), "Should not have error reason");
-}
-
-#[test]
-fn test_valid_game_seed237054789() {
-    let (seed, events) = load_and_parse_log("../../pong-log_seed237054789_events40_1757556139973.json");
-
-    let input = ValidateLogInput { seed, events };
-
-    let env = ExecutorEnv::builder()
-        .write(&input)
-        .unwrap()
-        .build()
-        .unwrap();
-
-    let prover = default_prover();
-    let prove_info = prover
-        .prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF)
-        .expect("Failed to generate proof");
-
-    let receipt = prove_info.receipt;
-
-    receipt
-        .verify(GUEST_CODE_FOR_ZK_PROOF_ID)
-        .expect("Receipt verification failed");
-
-    let output: ValidateLogOutput = receipt.journal.decode().expect("Failed to decode journal");
-
-    assert!(output.fair, "Game should be fair");
-    assert_eq!(output.left_score, 0, "Expected left score 0");
-    assert_eq!(output.right_score, 3, "Expected right score 3");
-    assert_eq!(output.events_len, 80, "Expected 80 events");
-}
-
-#[test]
-fn test_valid_game_seed725309225() {
-    let (seed, events) = load_and_parse_log("../../pong-log_seed725309225_events59_1761069335045.json");
-
-    let input = ValidateLogInput { seed, events };
-
-    let env = ExecutorEnv::builder()
-        .write(&input)
-        .unwrap()
-        .build()
-        .unwrap();
-
-    let prover = default_prover();
-    let prove_info = prover
-        .prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF)
-        .expect("Failed to generate proof");
-
-    let receipt = prove_info.receipt;
-
-    receipt
-        .verify(GUEST_CODE_FOR_ZK_PROOF_ID)
-        .expect("Receipt verification failed");
-
-    let output: ValidateLogOutput = receipt.journal.decode().expect("Failed to decode journal");
-
-    assert!(output.fair, "Game should be fair");
-    assert_eq!(output.left_score, 3, "Expected left score 3");
-    assert_eq!(output.right_score, 2, "Expected right score 2");
-    assert_eq!(output.events_len, 118, "Expected 118 events");
-}
-
-// Config validation tests removed - config is now hardcoded as constants
-
 #[test]
 fn test_invalid_too_many_events() {
-    let seed = 12345;
     let events = vec![0; 10002]; // Over the 10,000 limit
 
-    let input = ValidateLogInput { seed, events };
+    let input = ValidateLogInput { events };
 
     let env = ExecutorEnv::builder()
         .write(&input)
@@ -176,10 +52,9 @@ fn test_invalid_too_many_events() {
 
 #[test]
 fn test_odd_event_count() {
-    let seed = 12345;
     let events = vec![0; 11]; // Odd number - invalid!
 
-    let input = ValidateLogInput { seed, events };
+    let input = ValidateLogInput { events };
 
     let env = ExecutorEnv::builder()
         .write(&input)
@@ -204,10 +79,9 @@ fn test_odd_event_count() {
 
 #[test]
 fn test_exactly_10000_events() {
-    let seed = 12345;
     let events = vec![0; 10000]; // Exactly at the limit - should be OK
 
-    let input = ValidateLogInput { seed, events };
+    let input = ValidateLogInput { events };
 
     let env = ExecutorEnv::builder()
         .write(&input)
@@ -235,11 +109,9 @@ fn test_exactly_10000_events() {
 
 #[test]
 fn test_hash_determinism() {
-    let seed = 42;
     let events = vec![12345, 67890, 11111, 22222];
 
     let input = ValidateLogInput {
-        seed,
         events: events.clone(),
     };
 
@@ -266,5 +138,135 @@ fn test_hash_determinism() {
     assert_eq!(
         hashes[0], hashes[1],
         "Hash should be deterministic - same inputs should produce same hash"
+    );
+}
+
+#[test]
+fn test_empty_events() {
+    let events: Vec<i128> = vec![];
+
+    let input = ValidateLogInput { events };
+
+    let env = ExecutorEnv::builder()
+        .write(&input)
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let prover = default_prover();
+    let prove_info = prover.prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF).unwrap();
+
+    let receipt = prove_info.receipt;
+    receipt.verify(GUEST_CODE_FOR_ZK_PROOF_ID).unwrap();
+
+    let output: ValidateLogOutput = receipt.journal.decode().unwrap();
+
+    // Empty events is invalid - game never started
+    assert!(!output.fair, "Empty events should be unfair");
+    assert!(
+        output.reason.unwrap().contains("No events provided"),
+        "Error should mention no events"
+    );
+}
+
+#[test]
+fn test_paddle_out_of_bounds() {
+    // Create events with extreme paddle position (out of bounds)
+    let events = vec![
+        1030792151040,           // leftY - center (valid)
+        1030792151040,           // rightY - center (valid)
+        10000000000000000,       // leftY - extreme position (invalid)
+        1030792151040,           // rightY - center
+    ];
+
+    let input = ValidateLogInput { events };
+
+    let env = ExecutorEnv::builder()
+        .write(&input)
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let prover = default_prover();
+    let prove_info = prover.prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF).unwrap();
+
+    let receipt = prove_info.receipt;
+    receipt.verify(GUEST_CODE_FOR_ZK_PROOF_ID).unwrap();
+
+    let output: ValidateLogOutput = receipt.journal.decode().unwrap();
+
+    assert!(!output.fair, "Game should be unfair with out of bounds paddle");
+    let reason = output.reason.as_ref().unwrap();
+    assert!(
+        reason.contains("too fast") || reason.contains("bounds"),
+        "Error should mention movement violation"
+    );
+}
+
+#[test]
+fn test_paddle_too_fast() {
+    // Create events where paddle moves too fast between events
+    let events = vec![
+        1030792151040,  // leftY - center
+        1030792151040,  // rightY - center
+        1030792151040,  // leftY - still at center
+        2000000000000,  // rightY - huge jump (too fast)
+    ];
+
+    let input = ValidateLogInput { events };
+
+    let env = ExecutorEnv::builder()
+        .write(&input)
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let prover = default_prover();
+    let prove_info = prover.prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF).unwrap();
+
+    let receipt = prove_info.receipt;
+    receipt.verify(GUEST_CODE_FOR_ZK_PROOF_ID).unwrap();
+
+    let output: ValidateLogOutput = receipt.journal.decode().unwrap();
+
+    assert!(!output.fair, "Game should be unfair when paddle moves too fast");
+    assert!(
+        output.reason.unwrap().contains("too fast"),
+        "Error should mention paddle moving too fast"
+    );
+}
+
+#[test]
+fn test_final_score_validation() {
+    // Test that games must reach exactly POINTS_TO_WIN to be valid
+    // This prevents players from claiming victory with incomplete games
+
+    // Test 1: Game ending at 1-0 should be invalid (didn't reach POINTS_TO_WIN)
+    let events = vec![
+        1030792151040,  // leftY - center
+        1030792151040,  // rightY - center (will miss, left scores 1)
+    ];
+
+    let input = ValidateLogInput { events };
+
+    let env = ExecutorEnv::builder()
+        .write(&input)
+        .unwrap()
+        .build()
+        .unwrap();
+
+    let prover = default_prover();
+    let prove_info = prover.prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF).unwrap();
+
+    let receipt = prove_info.receipt;
+    receipt.verify(GUEST_CODE_FOR_ZK_PROOF_ID).unwrap();
+
+    let output: ValidateLogOutput = receipt.journal.decode().unwrap();
+
+    // Should be rejected - neither player reached POINTS_TO_WIN
+    assert!(!output.fair, "Game ending at 1-0 should be invalid");
+    assert!(
+        output.reason.unwrap().contains("neither player reached POINTS_TO_WIN"),
+        "Error should mention final score validation"
     );
 }

@@ -16,8 +16,8 @@ import {
   clampPaddleY as clampPaddleY_fixed,
   cordicSinCos,
   degToRadFixed,
-  degMilliToRadFixed,
-  fixedFromPermille,
+  toFixedInt,
+  FRAC_BITS,
 } from './fixed'
 import {
   MAX_EVENTS,
@@ -31,18 +31,16 @@ import {
   SERVE_SPEED,
   SPEED_INCREMENT,
   MAX_BOUNCE_ANGLE_DEG,
-  SERVE_MAX_ANGLE_DEG,
   POINTS_TO_WIN,
-  MICRO_JITTER_MILLI_DEG,
-  AI_OFFSET_MAX_PERMILLE,
   INITIAL_SERVE_DIRECTION,
+  ANGLE_RANGE,
+  SERVE_ANGLE_MULTIPLIER,
 } from './constants'
 
 type NumberLike = string | number
 
 export interface CompactLog {
   v: 1
-  seed: number
   // Flat array of paddle pairs per event: [l0, r0, l1, r1, ...]
   events: NumberLike[]
 }
@@ -53,43 +51,6 @@ export interface ValidateResult {
   leftScore: number
   rightScore: number
 }
-
-// Simple LCG (Linear Congruential Generator) for deterministic RNG
-// CRITICAL: This must match the Rust implementation exactly!
-// See prover/methods/guest/src/physics.rs LcgRng
-// Algorithm: state = (state * 1664525 + 1013904223) mod 2^32
-// Parameters from Numerical Recipes (a=1664525, c=1013904223)
-class RNG {
-  private state: number
-  constructor(seed: number) {
-    // CRITICAL: seed=0 becomes 1 to match Rust implementation
-    this.state = (seed >>> 0) || 1
-  }
-  next(): number {
-    // Parameters from Numerical Recipes
-    this.state = (1664525 * this.state + 1013904223) >>> 0
-    return this.state / 0x100000000
-  }
-  range(min: number, max: number): number {
-    return min + (max - min) * this.next()
-  }
-  nextU32(): number {
-    // Advance once to get new state; reuse multiplier/addend
-    this.state = (1664525 * this.state + 1013904223) >>> 0
-    return this.state >>> 0
-  }
-}
-
-// Uniform range in fixed-point: returns value in [minI, maxI]
-function rangeFixed(rng: RNG, minI: I, maxI: I): I {
-  const u = BigInt(rng.nextU32()) // 0..2^32-1
-  const span = iSub(maxI, minI)
-  // (span * u) / 2^32
-  const scaled = (span * u) / (1n << 32n)
-  return iAdd(minI, scaled as unknown as I)
-}
-
-// (floating-point helpers removed; fixed-point variants are used)
 
 interface EngineState {
   t0: number
@@ -126,16 +87,8 @@ interface UpdateCallbackState {
   ended: boolean
 }
 
-export function runGame(canvas: HTMLCanvasElement, seed: number) {
+export function runGame(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext('2d')!
-  // Separate RNGs: physics affects validation; AI does not.
-  // CRITICAL: Two-RNG design pattern explained:
-  // 1. rngPhysics: Used for serve angles, bounce jitter → affects logged paddle positions
-  // 2. rngAI: Used for AI targeting decisions → does NOT affect validation
-  // Why? Validator checks paddle positions are REACHABLE, not that they're OPTIMAL
-  // This allows AI imperfection without breaking deterministic validation
-  const rngPhysics = new RNG(seed)
-  const rngAI = new RNG((seed ^ 0x9e3779b9) >>> 0) // XOR for decorrelation
 
   // Fixed constants
   const widthI = toFixed(WIDTH)
@@ -148,8 +101,6 @@ export function runGame(canvas: HTMLCanvasElement, seed: number) {
   const serveSpeedI = toFixed(SERVE_SPEED)
   const speedIncrementI = toFixed(SPEED_INCREMENT)
   const maxBounceAngleI = degToRadFixed(MAX_BOUNCE_ANGLE_DEG)
-  const serveMaxAngleI = degToRadFixed(SERVE_MAX_ANGLE_DEG)
-  const microJitterI = degMilliToRadFixed(MICRO_JITTER_MILLI_DEG)
 
   const yMinI = ballRadiusI
   const yMaxI = iSub(heightI, ballRadiusI)
@@ -157,8 +108,11 @@ export function runGame(canvas: HTMLCanvasElement, seed: number) {
   const rightFaceI = iSub(widthI, iAdd(paddleMarginI, paddleWidthI))
 
   // Serve towards receiverDir (-1 means serve heading left, 1 means serve heading right)
-  function serveFixed(receiverDir: -1 | 1, tStart: number): FixState {
-    const angleI = rangeFixed(rngPhysics, -serveMaxAngleI, serveMaxAngleI)
+  // Angle determined by volley count for deterministic variation
+  function serveFixed(receiverDir: -1 | 1, tStart: number, volleyCount: number): FixState {
+    // Calculate deterministic serve angle based on volley count
+    const angleRaw = ((volleyCount * SERVE_ANGLE_MULTIPLIER) % ANGLE_RANGE) - MAX_BOUNCE_ANGLE_DEG
+    const angleI = degToRadFixed(angleRaw)
     const { sin, cos } = cordicSinCos(angleI)
     const vx = iMul(serveSpeedI, iMul(cos, toFixed(receiverDir)))
     const vy = iMul(serveSpeedI, sin)
@@ -196,12 +150,11 @@ export function runGame(canvas: HTMLCanvasElement, seed: number) {
     const tHitI = iAdd(fs.t0, dtToP)
     const yInterceptI = reflect1D_fixed(fs.y, fs.vy, iSub(tHitI, fs.t0), yMinI, yMaxI)
     const halfI = iDiv(paddleHeightI, toFixed(2))
-    const aimOffsetRatioI = rangeFixed(
-      rngAI,
-      -fixedFromPermille(AI_OFFSET_MAX_PERMILLE),
-      fixedFromPermille(AI_OFFSET_MAX_PERMILLE)
-    )
-    const aimOffsetI = iMul(aimOffsetRatioI, iAdd(halfI, ballRadiusI))
+    // AI aims for a random point along the paddle height
+    // Randomness is fine here since paddle positions are logged and validated for reachability
+    const paddleHeightPixels = Number(paddleHeightI >> FRAC_BITS)
+    const randomOffset = Math.random() * paddleHeightPixels - (paddleHeightPixels / 2)
+    const aimOffsetI = toFixedInt(Math.floor(randomOffset))
     const desiredI = clampPaddleY_fixed(iAdd(yInterceptI, aimOffsetI), halfI, heightI)
     const movingLeftNext = fs.dir < 0
     if (movingLeftNext) {
@@ -238,6 +191,7 @@ export function runGame(canvas: HTMLCanvasElement, seed: number) {
   // (unused float clamp removed; using fixed clamp only)
 
   // Determine bounce off paddle: set new vx,vy, speed increased.
+  // Bounce reflection - angle determined purely by paddle position (no jitter)
   function bounceFixed(fs: FixState, paddleYI: I): { vx: I; vy: I; speed: I; dir: -1 | 1; angleI: I } {
     const halfI = iDiv(paddleHeightI, toFixed(2))
     const limit = iAdd(halfI, ballRadiusI)
@@ -249,9 +203,7 @@ export function runGame(canvas: HTMLCanvasElement, seed: number) {
 
     const offsetI = iMax(iSub(0n as I, limit), iMin(limit, iSub(fs.y, paddleYI)))
     const normI = iDiv(offsetI, limit)
-    let angleI = iMax(iSub(0n as I, maxBounceAngleI), iMin(maxBounceAngleI, iMul(normI, maxBounceAngleI)))
-    const jitterI = rangeFixed(rngPhysics, -microJitterI, microJitterI)
-    angleI = iMax(iSub(0n as I, maxBounceAngleI), iMin(maxBounceAngleI, iAdd(angleI, jitterI)))
+    const angleI = iMax(iSub(0n as I, maxBounceAngleI), iMin(maxBounceAngleI, iMul(normI, maxBounceAngleI)))
     const newSpeed = iAdd(fs.speed, speedIncrementI)
     const newDir: -1 | 1 = fs.dir < 0 ? 1 : -1
     const { sin, cos } = cordicSinCos(angleI)
@@ -263,7 +215,7 @@ export function runGame(canvas: HTMLCanvasElement, seed: number) {
   // Renderer uses analytical positions; we only change kinematics at event times.
   // Add a rally counter to align GAME vs VALIDATE logs.
   let rallyId = 0
-  let fState: FixState = serveFixed(INITIAL_SERVE_DIRECTION, performance.now() / 1000)
+  let fState: FixState = serveFixed(INITIAL_SERVE_DIRECTION, performance.now() / 1000, 0)
   let state: EngineState = {
     t0: fromFixed(fState.t0),
     x: fromFixed(fState.x),
@@ -298,7 +250,7 @@ export function runGame(canvas: HTMLCanvasElement, seed: number) {
   rightM.target = fState.rightY
   planTargetsForNextEventFix(fState)
 
-  const log: CompactLog = { v: 1, seed, events: [] }
+  const log: CompactLog = { v: 1, events: [] }
   const listeners: Array<(s: UpdateCallbackState) => void> = []
 
   function notify() {
@@ -406,7 +358,7 @@ export function runGame(canvas: HTMLCanvasElement, seed: number) {
       }
       // Serve toward the player who just received the point (the scorer)
       const receiverDir: -1 | 1 = movingLeft ? 1 : -1
-      fState = serveFixed(receiverDir, state.t0)
+      fState = serveFixed(receiverDir, state.t0, log.events.length)
       fState.leftY = toFixed(leftYAtHit)
       fState.rightY = toFixed(rightYAtHit)
       state = {
@@ -444,7 +396,7 @@ export function runGame(canvas: HTMLCanvasElement, seed: number) {
   // Animation: uses analytical positions between events; triggers steps as we reach event times.
   // CRITICAL: This uses performance.now() which is NOT deterministic
   // However, this only affects WHEN step() is called, not WHAT step() does
-  // The step() function itself is purely deterministic (fixed-point math + seeded RNG)
+  // The step() function itself is purely deterministic (fixed-point math with deterministic serve angles)
   // Rendering converts fixed-point to float for display only - never logged
   let rafId = 0
   function render() {
@@ -454,7 +406,7 @@ export function runGame(canvas: HTMLCanvasElement, seed: number) {
     const tHit = fromFixed(iAdd(fState.t0, timeToPaddleFixed(fState)))
     // If we are past the event time (or very near), perform the step and continue.
     if (now >= tHit - 1e-4) {
-      step() // ← Deterministic update (fixed-point + RNG)
+      step() // ← Deterministic update (fixed-point math)
     }
     // Draw current frame at time now
     draw(now) // ← Non-deterministic rendering (OK - not logged)
@@ -535,7 +487,6 @@ export function runGame(canvas: HTMLCanvasElement, seed: number) {
 export function validateLog(log: CompactLog): ValidateResult {
   try {
     if (!log || log.v !== 1) return { fair: false, reason: 'Invalid log format', leftScore: 0, rightScore: 0 }
-    const rngPhysics = new RNG(log.seed)
 
     // Fixed constants
     const widthI = toFixed(WIDTH)
@@ -547,16 +498,16 @@ export function validateLog(log: CompactLog): ValidateResult {
     const serveSpeedI = toFixed(SERVE_SPEED)
     const speedIncrementI = toFixed(SPEED_INCREMENT)
     const maxBounceAngleI = degToRadFixed(MAX_BOUNCE_ANGLE_DEG)
-    const serveMaxAngleI = degToRadFixed(SERVE_MAX_ANGLE_DEG)
-    const microJitterI = degMilliToRadFixed(MICRO_JITTER_MILLI_DEG)
 
     const yMinI = ballRadiusI
     const yMaxI = iSub(heightI, ballRadiusI)
     const leftFaceI = iAdd(paddleMarginI, paddleWidthI)
     const rightFaceI = iSub(widthI, iAdd(paddleMarginI, paddleWidthI))
 
-    function serve(receiverDir: -1 | 1, tStart: number): FixState {
-      const angleI = rangeFixed(rngPhysics, -serveMaxAngleI, serveMaxAngleI)
+    function serve(receiverDir: -1 | 1, tStart: number, volleyCount: number): FixState {
+      // Calculate deterministic serve angle based on volley count
+      const angleRaw = ((volleyCount * SERVE_ANGLE_MULTIPLIER) % ANGLE_RANGE) - MAX_BOUNCE_ANGLE_DEG
+      const angleI = degToRadFixed(angleRaw)
       const { sin, cos } = cordicSinCos(angleI)
       const vx = iMul(serveSpeedI, iMul(cos, toFixed(receiverDir)))
       const vy = iMul(serveSpeedI, sin)
@@ -585,21 +536,28 @@ export function validateLog(log: CompactLog): ValidateResult {
 
     // (unused float helpers removed)
 
-    let state = serve(INITIAL_SERVE_DIRECTION, 0)
+    let state = serve(INITIAL_SERVE_DIRECTION, 0, 0)
     let leftScore = 0
     let rightScore = 0
     let ended = false
     let rallyId = 0
     let eventIdx = 0
+    let processedEvents = 0 // Track total events processed to match log.events.length
+
+    // Empty games are invalid - no gameplay occurred
+    const eventsLen = Array.isArray(log.events) ? log.events.length : 0
+    if (eventsLen === 0) {
+      return { fair: false, reason: 'No events provided - game never started', leftScore: 0, rightScore: 0 }
+    }
 
     while (!ended) {
       // Each event is two entries (L, R)
-      const eventsLen = Array.isArray(log.events) ? log.events.length : 0
       if (eventsLen % 2 !== 0) {
         return { fair: false, reason: 'Malformed events length', leftScore, rightScore }
       }
       const eventCount = eventsLen / 2
       if (eventIdx >= eventCount) break
+      processedEvents += 2 // Process two events (L, R) per iteration
       const dtToPaddle = timeToPaddle(state)
       // dt must be positive; BigInt ensures finiteness
       if (!(dtToPaddle > 0n)) {
@@ -677,9 +635,7 @@ export function validateLog(log: CompactLog): ValidateResult {
         const halfI3 = iDiv(paddleHeightI, toFixed(2))
         const offsetI = iMax(iSub(0n as I, iAdd(halfI3, ballRadiusI)), iMin(iAdd(halfI3, ballRadiusI), iSub(state.y, contactYI)))
         const normI = iDiv(offsetI, iAdd(halfI3, ballRadiusI))
-        let angleI = iMax(iSub(0n as I, maxBounceAngleI), iMin(maxBounceAngleI, iMul(normI, maxBounceAngleI)))
-        const jitterI = rangeFixed(rngPhysics, -microJitterI, microJitterI)
-        angleI = iMax(iSub(0n as I, maxBounceAngleI), iMin(maxBounceAngleI, iAdd(angleI, jitterI)))
+        const angleI = iMax(iSub(0n as I, maxBounceAngleI), iMin(maxBounceAngleI, iMul(normI, maxBounceAngleI)))
         const newSpeed = iAdd(state.speed, speedIncrementI)
         const newDir: -1 | 1 = state.dir < 0 ? 1 : -1
         const { sin, cos } = cordicSinCos(angleI)
@@ -696,7 +652,7 @@ export function validateLog(log: CompactLog): ValidateResult {
           break
         }
         const receiverDir: -1 | 1 = movingLeft ? 1 : -1
-        const next = serve(receiverDir, fromFixed(state.t0))
+        const next = serve(receiverDir, fromFixed(state.t0), processedEvents)
         next.leftY = state.leftY
         next.rightY = state.rightY
         state = next
@@ -714,6 +670,21 @@ export function validateLog(log: CompactLog): ValidateResult {
       }
 
       eventIdx++
+    }
+
+    // Validate final score - one player must have exactly POINTS_TO_WIN
+    if (leftScore !== POINTS_TO_WIN && rightScore !== POINTS_TO_WIN) {
+      return { fair: false, reason: 'Invalid final score - neither player reached POINTS_TO_WIN', leftScore, rightScore }
+    }
+
+    // Reject scores beyond POINTS_TO_WIN
+    if (leftScore > POINTS_TO_WIN || rightScore > POINTS_TO_WIN) {
+      return { fair: false, reason: 'Invalid final score - game continued beyond POINTS_TO_WIN', leftScore, rightScore }
+    }
+
+    // Reject ties - games must have a winner
+    if (leftScore === rightScore) {
+      return { fair: false, reason: 'Game ended in a tie - invalid game', leftScore, rightScore }
     }
 
     return { fair: true, leftScore, rightScore }

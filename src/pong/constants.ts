@@ -1,6 +1,6 @@
 // Game configuration constants
 // These are hardcoded in both frontend and prover - must match exactly!
-// NOTE: SEED is NOT included here - it's logged per-game for unique physics
+// Physics is now fully deterministic based on event count - no seed needed
 
 /** Game board width (pixels) */
 export const WIDTH = 800
@@ -32,17 +32,14 @@ export const SPEED_INCREMENT = 50
 /** Maximum bounce angle off paddle (degrees) */
 export const MAX_BOUNCE_ANGLE_DEG = 60
 
-/** Maximum serve angle (degrees) */
-export const SERVE_MAX_ANGLE_DEG = 20
-
 /** Points needed to win the game */
 export const POINTS_TO_WIN = 3
 
-/** Micro jitter applied to bounces (milli-degrees) */
-export const MICRO_JITTER_MILLI_DEG = 800
+/** Serve angle calculation - range of possible angles */
+export const ANGLE_RANGE = MAX_BOUNCE_ANGLE_DEG * 2 + 1 // 121 values (-60 to +60)
 
-/** AI offset max (permille of paddle half + ball radius) */
-export const AI_OFFSET_MAX_PERMILLE = 600
+/** Serve angle calculation - multiplier for deterministic variation */
+export const SERVE_ANGLE_MULTIPLIER = 37 // Coprime with 121 for good distribution
 
 /** Initial serve direction: 1 = right, -1 = left */
 export const INITIAL_SERVE_DIRECTION = 1

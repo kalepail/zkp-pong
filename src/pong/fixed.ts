@@ -25,11 +25,6 @@ export function iDivByInt(a: I, n: number | bigint): I {
   return (a / BigInt(n)) as I
 }
 
-// Build a fixed-point from permille integer (0..1000)
-export function fixedFromPermille(p: number): I {
-  return ((BigInt(p) << FRAC_BITS) / 1000n) as I
-}
-
 export function fromFixed(x: I): number {
   // Convert Q32.32 fixed-point to floating-point for display/rendering only
   // NOTE: Result is NOT deterministic and should NEVER be logged or used in physics
@@ -79,15 +74,6 @@ export function degToRadFixed(d: number): I {
   const degFixed = toFixedInt(d)
   const num = iMul(degFixed, PI_Q32)
   return iDiv(num, toFixedInt(180))
-}
-
-// Convert milli-degrees to radians using integer-only math
-// Milli-degrees are thousandths of a degree (e.g., 800 = 0.8°)
-export function degMilliToRadFixed(md: number): I {
-  // rad = (md/1000) * PI / 180 = md * PI / 180000
-  const mdFixed = toFixedInt(md)
-  const num = iMul(mdFixed, PI_Q32)
-  return iDiv(num, toFixedInt(180000))
 }
 
 // CORDIC-based sin/cos in Q32.32 for angles in radians (also Q32.32).

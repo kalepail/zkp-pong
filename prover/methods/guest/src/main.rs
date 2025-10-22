@@ -31,8 +31,6 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
     let serve_speed = to_fixed_int(SERVE_SPEED as i128);
     let speed_increment = to_fixed_int(SPEED_INCREMENT as i128);
     let max_bounce_angle = deg_to_rad_fixed(MAX_BOUNCE_ANGLE_DEG);
-    let serve_max_angle = deg_to_rad_fixed(SERVE_MAX_ANGLE_DEG);
-    let micro_jitter = deg_milli_to_rad_fixed(MICRO_JITTER_MILLI_DEG);
 
     let y_min = ball_radius;
     let y_max = height - ball_radius;
@@ -43,9 +41,6 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
     let left_contact_x = left_face + ball_radius;
     let right_contact_x = right_face - ball_radius;
 
-    // RNG seeded by log input
-    let mut rng = LcgRng::new(inp.seed);
-
     // Serve helper
     let mut state = serve(
         INITIAL_SERVE_DIRECTION,
@@ -53,19 +48,21 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
         width,
         height,
         serve_speed,
-        serve_max_angle,
-        &mut rng,
+        MAX_BOUNCE_ANGLE_DEG,
+        ANGLE_RANGE,
+        SERVE_ANGLE_MULTIPLIER,
+        0,
     );
 
     let mut left_score: u32 = 0;
     let mut right_score: u32 = 0;
-    let mut ended = false;
 
     // Event validation
     let events = &inp.events; // Vec<I>
 
+    // Empty games are invalid - no gameplay occurred
     if events.is_empty() {
-        return ValidateLogOutput::invalid("No events provided");
+        return ValidateLogOutput::invalid("No events provided - game never started");
     }
     if events.len() > MAX_EVENTS as usize {
         return ValidateLogOutput::invalid("Too many events (exceeds MAX_EVENTS limit)");
@@ -74,8 +71,9 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
         return ValidateLogOutput::invalid("Events must be pairs");
     }
 
+    let mut processed_events = 0u32; // Track total events processed to match log.events.length
     for pair in events.chunks_exact(2) {
-        if ended { break; }
+        processed_events += 2; // Process two events (L, R) per iteration
         let l_i = pair[0];
         let r_i = pair[1];
 
@@ -139,9 +137,7 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
                 half,
                 ball_radius,
                 max_bounce_angle,
-                micro_jitter,
                 speed_increment,
-                &mut rng,
             );
             state.vx = vx;
             state.vy = vy;
@@ -150,7 +146,6 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
         } else {
             if moving_left { right_score += 1; } else { left_score += 1; }
             if left_score >= POINTS_TO_WIN || right_score >= POINTS_TO_WIN {
-                ended = true;
                 break;
             }
             // Serve toward scorer
@@ -161,13 +156,30 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
                 width,
                 height,
                 serve_speed,
-                serve_max_angle,
-                &mut rng,
+                MAX_BOUNCE_ANGLE_DEG,
+                ANGLE_RANGE,
+                SERVE_ANGLE_MULTIPLIER,
+                processed_events,
             );
             next.left_y = state.left_y;
             next.right_y = state.right_y;
             state = next;
         }
+    }
+
+    // Validate final score - one player must have exactly POINTS_TO_WIN
+    if left_score != POINTS_TO_WIN && right_score != POINTS_TO_WIN {
+        return ValidateLogOutput::invalid("Invalid final score - neither player reached POINTS_TO_WIN");
+    }
+
+    // Reject scores beyond POINTS_TO_WIN
+    if left_score > POINTS_TO_WIN || right_score > POINTS_TO_WIN {
+        return ValidateLogOutput::invalid("Invalid final score - game continued beyond POINTS_TO_WIN");
+    }
+
+    // Reject ties - games must have a winner
+    if left_score == right_score {
+        return ValidateLogOutput::invalid("Game ended in a tie - invalid game");
     }
 
     // Build commitment / hash of events for binding

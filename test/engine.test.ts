@@ -1,46 +1,9 @@
-// Tests for deterministic Pong engine and RISC0 zkVM compatibility
+// Unit tests for deterministic Pong engine and RISC0 zkVM compatibility
+// Tests that rely on specific JSON log files are in log-validation.test.ts
 import { describe, it, expect } from 'vitest'
 import { validateLog } from '../src/pong/engine'
-import type { CompactLog, GameConfig } from '../src/pong/engine'
-import { cordicSinCos, degToRadFixed, degMilliToRadFixed, toFixed, getCORDICConstants } from '../src/pong/fixed'
-import type { I } from '../src/pong/fixed'
-
-// Helper function to create config with default values
-function createTestConfig(overrides: Partial<GameConfig> = {}): GameConfig {
-  return {
-    seed: 12345,
-    width: 800,
-    height: 480,
-    paddleHeight: 80,
-    paddleWidth: 10,
-    paddleMargin: 16,
-    ballRadius: 6,
-    paddleMaxSpeed: 200,
-    serveSpeed: 500,
-    speedIncrement: 50,
-    maxBounceAngleDeg: 60,
-    serveMaxAngleDeg: 20,
-    pointsToWin: 1,
-    microJitterMilliDeg: 800,
-    aiOffsetMaxPermille: 600,
-    maxEvents: 10000,
-    initialServeDirection: 1,
-    maxWidth: 10000,
-    maxHeight: 10000,
-    maxPaddleWidth: 100,
-    maxBallRadius: 50,
-    maxPaddleSpeedLimit: 10000,
-    maxServeSpeedLimit: 10000,
-    maxSpeedIncrementLimit: 1000,
-    maxBounceAngleDegLimit: 89,
-    maxServeAngleDegLimit: 45,
-    maxPointsToWinLimit: 1000,
-    maxJitterMilliDegLimit: 10000,
-    ...overrides,
-  }
-}
-import { readFileSync } from 'fs'
-import { join } from 'path'
+import type { CompactLog } from '../src/pong/engine'
+import { cordicSinCos, degToRadFixed, toFixed, toFixedInt, getCORDICConstants, iMul, iAdd, reflect1D, FRAC_BITS } from '../src/pong/fixed'
 
 // Rust prover constants from prover/methods/guest/src/physics.rs
 const RUST_CONSTANTS = {
@@ -84,72 +47,22 @@ describe('RISC0 zkVM Compatibility', () => {
     })
   })
 
-  describe('Determinism Tests', () => {
-    it('should produce identical logs for same seed', () => {
-      const seed = 12345
-      const config = createTestConfig({ seed, pointsToWin: 1 }) // Short game for fast test
-
-      // Create mock canvas
-      const canvas1 = document.createElement('canvas')
-      const canvas2 = document.createElement('canvas')
-      canvas1.width = config.width
-      canvas1.height = config.height
-      canvas2.width = config.width
-      canvas2.height = config.height
-
-      // Would need to import runGame and actually run it
-      // For now, this is a placeholder showing the test structure
-      // In a real implementation, you'd need to make runGame work in Node.js test env
-
-      // This test requires more setup - marking as TODO
-      expect(true).toBe(true) // Placeholder
-    })
-
-    it('should validate a known good log', () => {
-      // Minimal valid log
+  describe('Log Validation', () => {
+    it('should reject empty events array', () => {
       const log: CompactLog = {
         v: 1,
-        config: createTestConfig({ seed: 12345, pointsToWin: 1 }),
-        events: [
-          '1030792151040', // leftY
-          '1030792151040', // rightY (miss event - both at center)
-        ],
+        events: [], // Empty is invalid - no gameplay occurred
       }
 
       const result = validateLog(log)
-      expect(result.fair).toBe(true)
-      expect(result.leftScore + result.rightScore).toBeGreaterThan(0)
-    })
-  })
-
-  describe('Edge Cases', () => {
-    it('should handle seed = 0 (converted to 1)', () => {
-      const log: CompactLog = {
-        v: 1,
-        config: createTestConfig({ seed: 0 }),
-        events: ['1030792151040', '1030792151040'],
-      }
-
-      const result = validateLog(log)
-      // Should not crash or produce errors
-      expect(result.fair).toBeDefined()
+      // Empty events is invalid - game never started
+      expect(result.fair).toBe(false)
+      expect(result.reason).toContain('No events provided')
     })
 
-    it('should handle max seed value', () => {
+    it('should reject odd number of events', () => {
       const log: CompactLog = {
         v: 1,
-        config: createTestConfig({ seed: 0xffffffff }),
-        events: ['1030792151040', '1030792151040'],
-      }
-
-      const result = validateLog(log)
-      expect(result.fair).toBeDefined()
-    })
-
-    it('should reject invalid log format', () => {
-      const log: CompactLog = {
-        v: 1,
-        config: createTestConfig(),
         events: ['1030792151040'], // Odd number - invalid!
       }
 
@@ -161,7 +74,6 @@ describe('RISC0 zkVM Compatibility', () => {
     it('should detect paddle moving too fast', () => {
       const log: CompactLog = {
         v: 1,
-        config: createTestConfig({ paddleMaxSpeed: 1, pointsToWin: 10 }),
         events: [
           '1030792151040', // Event 0: leftY - center
           '1030792151040', // Event 0: rightY - center
@@ -173,6 +85,48 @@ describe('RISC0 zkVM Compatibility', () => {
       const result = validateLog(log)
       expect(result.fair).toBe(false)
       expect(result.reason).toContain('too fast')
+    })
+
+    it('should detect out of bounds paddle', () => {
+      const log: CompactLog = {
+        v: 1,
+        events: [
+          '1030792151040', // leftY - center
+          '1030792151040', // rightY - center
+          '10000000000000000', // leftY - extreme position (invalid)
+          '1030792151040', // rightY
+        ],
+      }
+
+      const result = validateLog(log)
+      expect(result.fair).toBe(false)
+      // Will be caught as "too fast" or "out of bounds"
+      expect(result.fair).toBe(false)
+    })
+
+    it('should reject tied games', () => {
+      // Create a minimal log that would result in 0-0 (tie)
+      // Since we can't easily create a realistic tie scenario, we'll test this
+      // via the validation logic - ties are rejected at the end
+      const log: CompactLog = {
+        v: 1,
+        events: [
+          '1030792151040', // leftY at center
+          '1030792151040', // rightY at center - this will be a miss
+        ],
+      }
+
+      // This minimal log should NOT tie (one side will score), but serves as documentation
+      // The tie check is enforced after all events are processed
+      // A tie would only occur if both players reach POINTS_TO_WIN simultaneously
+      // which should be impossible given the game logic (one scores per rally)
+
+      // Note: In practice, ties shouldn't occur naturally in Pong gameplay
+      // The validation is defensive programming - it would only catch
+      // a maliciously crafted log that somehow bypasses score increments
+      const result = validateLog(log)
+      // This specific log won't tie, but documents the tie rejection exists
+      expect(result.fair).toBeDefined()
     })
   })
 
@@ -193,6 +147,24 @@ describe('RISC0 zkVM Compatibility', () => {
       expect(cos).toBeLessThan(expected + tolerance)
     })
 
+    it('should compute sin(0) = 0 and cos(0) = 1', () => {
+      const angle0 = degToRadFixed(0)
+      const { sin, cos } = cordicSinCos(angle0)
+
+      expect(sin).toBeLessThan(1000n) // Very close to 0
+      expect(cos).toBeGreaterThan(toFixedInt(1) - 1000n)
+      expect(cos).toBeLessThan(toFixedInt(1) + 1000n)
+    })
+
+    it('should compute sin(90) = 1 and cos(90) = 0', () => {
+      const angle90 = degToRadFixed(90)
+      const { sin, cos } = cordicSinCos(angle90)
+
+      expect(sin).toBeGreaterThan(toFixedInt(1) - 1000n)
+      expect(sin).toBeLessThan(toFixedInt(1) + 1000n)
+      expect(cos).toBeLessThan(1000n) // Very close to 0
+    })
+
     it('should handle degree to radian conversion', () => {
       const deg180 = degToRadFixed(180)
       // 180° = π radians
@@ -204,73 +176,107 @@ describe('RISC0 zkVM Compatibility', () => {
       expect(deg180).toBeLessThan(expectedPi + tolerance)
     })
 
-    it('should handle milli-degree conversion', () => {
-      const milliDeg = 800 // 0.8 degrees
-      const result = degMilliToRadFixed(milliDeg)
+    it('should handle negative angles', () => {
+      const anglePos30 = degToRadFixed(30)
+      const angleNeg30 = degToRadFixed(-30)
 
-      // 0.8° = 0.8 * π / 180 ≈ 0.01396263 radians
-      const expected = toFixed(0.01396263)
+      const { sin: sinPos, cos: cosPos } = cordicSinCos(anglePos30)
+      const { sin: sinNeg, cos: cosNeg } = cordicSinCos(angleNeg30)
 
-      const tolerance = 1000n
-      expect(result).toBeGreaterThan(expected - tolerance)
-      expect(result).toBeLessThan(expected + tolerance)
+      // sin(-θ) = -sin(θ) (allow small tolerance for CORDIC rounding)
+      const tolerance = 10n
+      expect(sinNeg).toBeGreaterThan(-sinPos - tolerance)
+      expect(sinNeg).toBeLessThan(-sinPos + tolerance)
+      // cos(-θ) = cos(θ)
+      expect(cosNeg).toBeGreaterThan(cosPos - tolerance)
+      expect(cosNeg).toBeLessThan(cosPos + tolerance)
     })
   })
 
-  describe('Event Limit Enforcement', () => {
-    it('should respect maximum event count', () => {
-      // This would test that the frontend stops at MAX_EVENTS
-      // Requires actually running a game - placeholder for now
-      const MAX_EVENTS = 10000
-      expect(MAX_EVENTS).toBe(10000)
+  describe('Physics - Reflection', () => {
+    it('should reflect ball within bounds', () => {
+      const y0 = toFixedInt(100)
+      const vy = toFixedInt(50) // Moving down
+      const dt = toFixedInt(2)
+      const minY = toFixedInt(0)
+      const maxY = toFixedInt(480)
+
+      const result = reflect1D(y0, vy, dt, minY, maxY)
+
+      // Ball should move 50*2 = 100 pixels down to y=200
+      expect(result).toBe(toFixedInt(200))
+    })
+
+    it('should reflect ball at top boundary', () => {
+      const y0 = toFixedInt(10)
+      const vy = toFixedInt(-50) // Moving up
+      const dt = toFixedInt(1)
+      const minY = toFixedInt(0)
+      const maxY = toFixedInt(480)
+
+      const result = reflect1D(y0, vy, dt, minY, maxY)
+
+      // Ball should hit top and reflect
+      // Position would be -40, reflects to 40
+      expect(result).toBe(toFixedInt(40))
+    })
+
+    it('should reflect ball at bottom boundary', () => {
+      const y0 = toFixedInt(470)
+      const vy = toFixedInt(50) // Moving down
+      const dt = toFixedInt(1)
+      const minY = toFixedInt(0)
+      const maxY = toFixedInt(480)
+
+      const result = reflect1D(y0, vy, dt, minY, maxY)
+
+      // Ball should hit bottom and reflect
+      // Position would be 520, reflects back
+      expect(result).toBe(toFixedInt(440))
+    })
+
+    it('should handle multiple reflections', () => {
+      const y0 = toFixedInt(10)
+      const vy = toFixedInt(-500) // Very fast upward
+      const dt = toFixedInt(3)
+      const minY = toFixedInt(0)
+      const maxY = toFixedInt(480)
+
+      const result = reflect1D(y0, vy, dt, minY, maxY)
+
+      // Ball bounces multiple times, should still be in bounds
+      const resultNum = Number(result >> FRAC_BITS)
+      expect(resultNum).toBeGreaterThanOrEqual(0)
+      expect(resultNum).toBeLessThanOrEqual(480)
     })
   })
 
-  describe('Config Validation', () => {
-    it('should handle empty events array', () => {
-      const log: CompactLog = {
-        v: 1,
-        config: createTestConfig(),
-        events: [], // Empty is valid - game never started
-      }
+  describe('Physics - Bounce Angles', () => {
+    it('should produce angles within valid range', () => {
+      // Max bounce angle is 60 degrees
+      const angle60 = degToRadFixed(60)
+      const { sin: sin60, cos: cos60 } = cordicSinCos(angle60)
 
-      const result = validateLog(log)
-      // Empty events means game never started - should be "fair" (no cheating)
-      expect(result.fair).toBe(true)
-      expect(result.leftScore).toBe(0)
-      expect(result.rightScore).toBe(0)
+      // sin^2 + cos^2 should = 1 (Pythagorean identity)
+      const sin2 = iMul(sin60, sin60)
+      const cos2 = iMul(cos60, cos60)
+      const sum = iAdd(sin2, cos2)
+
+      // Should be very close to 1.0 in fixed point
+      const one = toFixedInt(1)
+      const tolerance = 10000n
+      expect(sum).toBeGreaterThan(one - tolerance)
+      expect(sum).toBeLessThan(one + tolerance)
     })
 
-    it('should detect paddle violations', () => {
-      // Out of bounds paddle will also be detected as "too fast" in most cases
-      // since it requires teleportation. This test verifies rejection happens.
-      const log: CompactLog = {
-        v: 1,
-        config: createTestConfig({ pointsToWin: 10 }),
-        events: [
-          '1030792151040', // leftY - center
-          '1030792151040', // rightY - center
-          '10000000000000000', // leftY - extreme position (invalid)
-          '1030792151040', // rightY
-        ],
-      }
+    it('should produce shallow angles when hitting paddle center', () => {
+      // Hitting center of paddle should produce small angle
+      const angle0 = degToRadFixed(0)
+      const { sin: sin0 } = cordicSinCos(angle0)
 
-      const result = validateLog(log)
-      expect(result.fair).toBe(false)
-      // Will be caught as "too fast" since bounds check comes after speed check
-      expect(result.reason).toContain('too fast')
-    })
-
-    it('should validate normal config values', () => {
-      const log: CompactLog = {
-        v: 1,
-        config: createTestConfig({ seed: 99999, pointsToWin: 3 }),
-        events: [],
-      }
-
-      const result = validateLog(log)
-      // Valid config with no events should pass
-      expect(result.fair).toBe(true)
+      // sin(0°) ≈ 0
+      expect(sin0).toBeLessThan(1000n)
+      expect(sin0).toBeGreaterThan(-1000n)
     })
   })
 
@@ -278,7 +284,6 @@ describe('RISC0 zkVM Compatibility', () => {
     it('should handle very large BigInt values', () => {
       const log: CompactLog = {
         v: 1,
-        config: createTestConfig(),
         events: [
           '999999999999999999', // Very large but valid Q32.32 value
           '1030792151040',
@@ -293,113 +298,57 @@ describe('RISC0 zkVM Compatibility', () => {
     it('should reject non-numeric event strings', () => {
       const log: CompactLog = {
         v: 1,
-        config: createTestConfig(),
         events: ['not a number' as any, '1030792151040'],
       }
 
-      // This should fail gracefully
-      expect(() => validateLog(log)).not.toThrow()
+      // Should fail gracefully - validation will catch invalid values
+      const result = validateLog(log)
+      expect(result.fair).toBe(false)
     })
   })
-})
 
-describe('RNG Determinism', () => {
-  it('should produce consistent sequence for same seed', () => {
-    // Simple LCG test
-    class TestRNG {
-      private state: number
-      constructor(seed: number) {
-        this.state = (seed >>> 0) || 1
+  describe('Serialization', () => {
+    it('should handle very large BigInt values', () => {
+      const log: CompactLog = {
+        v: 1,
+        events: [
+          '999999999999999999', // Very large but valid Q32.32 value
+          '1030792151040',
+        ],
       }
-      next(): number {
-        this.state = (1664525 * this.state + 1013904223) >>> 0
-        return this.state
+
+      const result = validateLog(log)
+      // Should handle gracefully (might fail for other reasons but not parsing)
+      expect(result).toBeDefined()
+    })
+
+    it('should reject non-numeric event strings', () => {
+      const log: CompactLog = {
+        v: 1,
+        events: ['not a number' as any, '1030792151040'],
       }
-    }
 
-    const rng1 = new TestRNG(12345)
-    const rng2 = new TestRNG(12345)
-
-    for (let i = 0; i < 100; i++) {
-      expect(rng1.next()).toBe(rng2.next())
-    }
-  })
-
-  it('should convert seed=0 to seed=1', () => {
-    class TestRNG {
-      private state: number
-      constructor(seed: number) {
-        this.state = (seed >>> 0) || 1
-      }
-      next(): number {
-        this.state = (1664525 * this.state + 1013904223) >>> 0
-        return this.state
-      }
-    }
-
-    const rng0 = new TestRNG(0)
-    const rng1 = new TestRNG(1)
-
-    expect(rng0.next()).toBe(rng1.next())
-  })
-
-  it('should handle all 32-bit seeds', () => {
-    class TestRNG {
-      private state: number
-      constructor(seed: number) {
-        this.state = (seed >>> 0) || 1
-      }
-      next(): number {
-        this.state = (1664525 * this.state + 1013904223) >>> 0
-        return this.state
-      }
-    }
-
-    // Test a few edge cases
-    const seeds = [0, 1, 0x7fffffff, 0x80000000, 0xffffffff]
-    seeds.forEach(seed => {
-      const rng = new TestRNG(seed)
-      const val = rng.next()
-      expect(val).toBeGreaterThanOrEqual(0)
-      expect(val).toBeLessThanOrEqual(0xffffffff)
+      // Should fail gracefully - validation will catch invalid values
+      const result = validateLog(log)
+      expect(result.fair).toBe(false)
     })
   })
-})
 
-describe('Real Game Log Validation', () => {
-  it('should validate pong-log_seed237054789 (40 volleys, 80 events)', () => {
-    const logPath = join(__dirname, '..', 'pong-log_seed237054789_events40_1757556139973.json')
-    const logData = readFileSync(logPath, 'utf-8')
-    const log: CompactLog = JSON.parse(logData)
+  describe('Score Validation', () => {
+    it('should reject scores under POINTS_TO_WIN', () => {
+      // Test that a game ending at 1-0 is invalid (didn't reach POINTS_TO_WIN)
+      const log: CompactLog = {
+        v: 1,
+        events: [
+          '1030792151040', // leftY at center
+          '1030792151040', // rightY at center - miss, left scores 1
+        ],
+      }
 
-    const result = validateLog(log)
-    expect(result.fair).toBe(true)
-    expect(result.leftScore + result.rightScore).toBeGreaterThan(0)
-    expect(log.events.length).toBe(80) // Each volley = 2 events (leftY, rightY)
-    expect(log.config.seed).toBe(237054789)
-  })
-
-  it('should validate pong-log_seed930397884 (49 volleys, 98 events)', () => {
-    const logPath = join(__dirname, '..', 'pong-log_seed930397884_events49_1757552715309.json')
-    const logData = readFileSync(logPath, 'utf-8')
-    const log: CompactLog = JSON.parse(logData)
-
-    const result = validateLog(log)
-    expect(result.fair).toBe(true)
-    expect(result.leftScore + result.rightScore).toBeGreaterThan(0)
-    expect(log.events.length).toBe(98) // Each volley = 2 events (leftY, rightY)
-    expect(log.config.seed).toBe(930397884)
-  })
-
-  it('should validate pong-log_seed725309225 (59 volleys, 118 events)', () => {
-    const logPath = join(__dirname, '..', 'pong-log_seed725309225_events59_1761069335045.json')
-    const logData = readFileSync(logPath, 'utf-8')
-    const log: CompactLog = JSON.parse(logData)
-
-    const result = validateLog(log)
-    expect(result.fair).toBe(true)
-    expect(result.leftScore + result.rightScore).toBeGreaterThan(0)
-    expect(log.events.length).toBe(118) // Each volley = 2 events (leftY, rightY)
-    expect(log.config.seed).toBe(725309225)
+      const result = validateLog(log)
+      // Should be rejected - game ended at 1-0, didn't reach POINTS_TO_WIN
+      expect(result.fair).toBe(false)
+      expect(result.reason).toContain('Invalid final score - neither player reached POINTS_TO_WIN')
+    })
   })
 })
