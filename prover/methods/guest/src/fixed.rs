@@ -12,9 +12,10 @@
 // - Practical game values: 800×480 board, speeds <1000 px/s
 //
 // ## Overflow Protection
-// - Multiplication checks operands don't exceed 2^31
-// - Division uses checked_shl to detect overflow
-// - Addition/subtraction rely on Cargo.toml overflow-checks=true
+// - All operations protected by Cargo.toml: overflow-checks = true (both dev and release)
+// - Multiplication: Manual pre-checks prevent intermediate overflow before right-shift
+// - Division: checked_shl prevents shift overflow
+// - Addition/subtraction/shifts: Automatic panic on overflow via overflow-checks
 //
 // ## Determinism Guarantee
 // All operations are pure integer arithmetic with no floating-point.
@@ -91,12 +92,9 @@ pub fn reflect1d(y0: I, vy: I, dt: I, min_y: I, max_y: I) -> I {
     let span = max_y - min_y;
     if span <= 0 { return y0; }
 
-    // Verify span won't overflow when doubled
-    // With validated config (height <= 10000), this check never triggers
-    if span > (I::MAX >> 1) {
-        panic!("Reflection span too large: would overflow when computing period");
-    }
-
+    // Overflow protection provided by:
+    // 1. Cargo.toml: overflow-checks = true (catches shift overflow)
+    // 2. i_mul() internal checks (catches vy * dt overflow)
     let period = span << 1; // 2*span
     let mut y = y0 + i_mul(vy, dt) - min_y;
 

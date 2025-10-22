@@ -14,6 +14,9 @@ pub type I = i64;
 #[derive(Serialize, Deserialize)]
 pub struct ValidateLogInput {
     pub events: Vec<I>,
+    /// Unique game identifier - used for serve angle entropy
+    /// Generated randomly by client at game start
+    pub game_id: u32,
 }
 
 /// Output structure from log validation (returned by guest)
@@ -25,10 +28,12 @@ pub struct ValidateLogOutput {
     pub right_score: u32,
     pub events_len: u32,
     pub log_hash_sha256: [u8; 32],
+    /// Game ID included in output for replay protection
+    pub game_id: u32,
 }
 
 impl ValidateLogOutput {
-    pub fn ok(left: u32, right: u32, events_len: u32, hash: [u8; 32]) -> Self {
+    pub fn ok(left: u32, right: u32, events_len: u32, hash: [u8; 32], game_id: u32) -> Self {
         Self {
             fair: true,
             reason: None,
@@ -36,6 +41,7 @@ impl ValidateLogOutput {
             right_score: right,
             events_len,
             log_hash_sha256: hash,
+            game_id,
         }
     }
 
@@ -47,6 +53,7 @@ impl ValidateLogOutput {
             right_score: 0,
             events_len: 0,
             log_hash_sha256: [0u8; 32],
+            game_id: 0,
         }
     }
 }
@@ -56,6 +63,8 @@ impl ValidateLogOutput {
 pub struct CompactLog {
     pub v: u32,
     pub events: Vec<String>,
+    /// Game ID - used for serve angle entropy and replay protection
+    pub game_id: u32,
 }
 
 /// Compute SHA-256 hash of game log events

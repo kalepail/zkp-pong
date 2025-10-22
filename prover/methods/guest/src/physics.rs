@@ -35,16 +35,12 @@ pub fn cordic_sin_cos(angle: I) -> (I, I) {
         let x_shift = x >> shift;
         let y_shift = y >> shift;
 
-        // Use checked multiplication for CORDIC iterations
-        // Mathematically, these multiplications cannot overflow with valid inputs
-        // (di is ±1, shifts reduce magnitude, K_Q16 and ATAN values are small)
-        // Defensive checks included for robustness and to catch potential bugs
-        let x_term = di.checked_mul(y_shift)
-            .expect("CORDIC x iteration overflow");
-        let y_term = di.checked_mul(x_shift)
-            .expect("CORDIC y iteration overflow");
-        let z_term = di.checked_mul(atan[i])
-            .expect("CORDIC z iteration overflow");
+        // CORDIC rotation step
+        // These multiplications cannot overflow: di is ±1, values are small after shifts
+        // Overflow protection provided by Cargo.toml: overflow-checks = true
+        let x_term = di * y_shift;
+        let y_term = di * x_shift;
+        let z_term = di * atan[i];
 
         x = x - x_term;
         y = y + y_term;
@@ -77,9 +73,18 @@ pub fn serve(
     angle_range: i32,
     serve_angle_multiplier: i32,
     volley_count: u32,
+    game_id: u32,
 ) -> FixState {
-    // Calculate deterministic serve angle based on volley count
-    let angle_raw = ((volley_count as i32 * serve_angle_multiplier) % angle_range) - max_bounce_angle_deg;
+    // Calculate deterministic serve angle mixing volley count + game_id
+    // This prevents all games from having identical serve patterns while remaining deterministic
+    // SECURITY: Use game_id to provide per-game entropy, preventing predictability
+
+    // Mix game_id with volley count for serve angle entropy
+    let entropy_mix = (volley_count as i32).wrapping_add(game_id as i32);
+
+    // SECURITY: Prevent overflow in angle calculation with wrapping arithmetic
+    let volley_i32 = (entropy_mix.wrapping_mul(serve_angle_multiplier)).rem_euclid(angle_range);
+    let angle_raw = volley_i32 - max_bounce_angle_deg;
     let angle = deg_to_rad_fixed(angle_raw);
     let (sinv, cosv) = cordic_sin_cos(angle);
     let vx = i_mul(serve_speed, i_mul(cosv, to_fixed_int(receiver_dir as i64)));

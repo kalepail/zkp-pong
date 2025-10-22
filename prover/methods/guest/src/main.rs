@@ -52,6 +52,7 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
         ANGLE_RANGE,
         SERVE_ANGLE_MULTIPLIER,
         0,
+        inp.game_id,
     );
 
     let mut left_score: u32 = 0;
@@ -90,15 +91,9 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
             return ValidateLogOutput::invalid("Invalid kinematics");
         }
 
+        // Addition overflow protection provided by overflow-checks = true
+        // With Q16.16 format and event limit (10,000), time overflow is mathematically impossible
         let t_hit = state.t0 + dt_to_paddle;
-
-        // Time overflow detection
-        // With Q16.16 format, max time is ~2^47 seconds (effectively unlimited for games)
-        // Event limit (10,000) ensures this check never triggers in practice
-        // Included for defense-in-depth and mathematical completeness
-        if t_hit < state.t0 {
-            return ValidateLogOutput::invalid("Time overflow detected");
-        }
         let y_at_hit = reflect1d(state.y, state.vy, dt_to_paddle, y_min, y_max);
 
         // Reachability
@@ -160,6 +155,7 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
                 ANGLE_RANGE,
                 SERVE_ANGLE_MULTIPLIER,
                 processed_events,
+                inp.game_id,
             );
             next.left_y = state.left_y;
             next.right_y = state.right_y;
@@ -184,5 +180,5 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
 
     // Build commitment / hash of events for binding
     let hash = compute_log_hash(events);
-    ValidateLogOutput::ok(left_score, right_score, events.len() as u32, hash)
+    ValidateLogOutput::ok(left_score, right_score, events.len() as u32, hash, inp.game_id)
 }

@@ -53,10 +53,13 @@ describe('RISC0 zkVM Compatibility', () => {
   })
 
   describe('Log Validation', () => {
+    const testGameId = 0 // Zero game_id for tests
+
     it('should reject empty events array', () => {
       const log: CompactLog = {
         v: 1,
         events: [], // Empty is invalid - no gameplay occurred
+        game_id: testGameId,
       }
 
       const result = validateLog(log)
@@ -69,6 +72,7 @@ describe('RISC0 zkVM Compatibility', () => {
       const log: CompactLog = {
         v: 1,
         events: ['1030792151040'], // Odd number - invalid!
+        game_id: testGameId,
       }
 
       const result = validateLog(log)
@@ -85,6 +89,7 @@ describe('RISC0 zkVM Compatibility', () => {
           '1030792151040', // Event 1: leftY - still at center
           '2000000000000', // Event 1: rightY - huge jump! (invalid)
         ],
+        game_id: testGameId,
       }
 
       const result = validateLog(log)
@@ -101,6 +106,7 @@ describe('RISC0 zkVM Compatibility', () => {
           '10000000000000000', // leftY - extreme position (invalid)
           '1030792151040', // rightY
         ],
+        game_id: testGameId,
       }
 
       const result = validateLog(log)
@@ -119,6 +125,7 @@ describe('RISC0 zkVM Compatibility', () => {
           '1030792151040', // leftY at center
           '1030792151040', // rightY at center - this will be a miss
         ],
+        game_id: testGameId,
       }
 
       // This minimal log should NOT tie (one side will score), but serves as documentation
@@ -286,6 +293,8 @@ describe('RISC0 zkVM Compatibility', () => {
   })
 
   describe('Serialization', () => {
+    const testGameId = 0
+
     it('should handle very large BigInt values', () => {
       const log: CompactLog = {
         v: 1,
@@ -293,6 +302,7 @@ describe('RISC0 zkVM Compatibility', () => {
           '999999999999999999', // Very large value (tests BigInt handling)
           '1030792151040',
         ],
+        game_id: testGameId,
       }
 
       const result = validateLog(log)
@@ -304,6 +314,7 @@ describe('RISC0 zkVM Compatibility', () => {
       const log: CompactLog = {
         v: 1,
         events: ['not a number' as any, '1030792151040'],
+        game_id: testGameId,
       }
 
       // Should fail gracefully - validation will catch invalid values
@@ -313,6 +324,8 @@ describe('RISC0 zkVM Compatibility', () => {
   })
 
   describe('Score Validation', () => {
+    const testGameId = 0
+
     it('should reject scores under POINTS_TO_WIN', () => {
       // Test that a game ending at 1-0 is invalid (didn't reach POINTS_TO_WIN)
       // Use actual log values to ensure paddle positions are valid
@@ -322,6 +335,7 @@ describe('RISC0 zkVM Compatibility', () => {
           '15728640', // leftY at center (start position)
           '15728640', // rightY at center - will miss
         ],
+        game_id: testGameId,
       }
 
       const result = validateLog(log)

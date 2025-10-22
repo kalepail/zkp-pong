@@ -9,38 +9,38 @@ import { join } from 'path'
 
 describe('Real Game Log Validation', () => {
   describe('Valid Game Logs', () => {
-    it('should validate game log with 67 events', () => {
-      const logPath = join(__dirname, '..', 'pong-log_events67_1761140976543.json')
+    it('should validate game log with 19 events', () => {
+      const logPath = join(__dirname, '..', 'pong-log_events19_1761147203682.json')
       const logData = readFileSync(logPath, 'utf-8')
       const log: CompactLog = JSON.parse(logData)
 
       const result = validateLog(log)
       expect(result.fair).toBe(true)
-      expect(log.events.length).toBe(134) // 67 pairs × 2
+      expect(log.events.length).toBe(38) // 19 pairs × 2
       // Winner should have exactly POINTS_TO_WIN
       expect(Math.max(result.leftScore, result.rightScore)).toBe(POINTS_TO_WIN)
     })
 
-    it('should validate game log with 75 events', () => {
-      const logPath = join(__dirname, '..', 'pong-log_events75_1761139604550.json')
+    it('should validate game log with 64 events', () => {
+      const logPath = join(__dirname, '..', 'pong-log_events64_1761147732142.json')
       const logData = readFileSync(logPath, 'utf-8')
       const log: CompactLog = JSON.parse(logData)
 
       const result = validateLog(log)
       expect(result.fair).toBe(true)
-      expect(log.events.length).toBe(150) // 75 pairs × 2
+      expect(log.events.length).toBe(128) // 64 pairs × 2
       // Winner should have exactly POINTS_TO_WIN
       expect(Math.max(result.leftScore, result.rightScore)).toBe(POINTS_TO_WIN)
     })
 
-    it('should validate game log with 86 events', () => {
-      const logPath = join(__dirname, '..', 'pong-log_events86_1761139690493.json')
+    it('should validate game log with 71 events', () => {
+      const logPath = join(__dirname, '..', 'pong-log_events71_1761147635847.json')
       const logData = readFileSync(logPath, 'utf-8')
       const log: CompactLog = JSON.parse(logData)
 
       const result = validateLog(log)
       expect(result.fair).toBe(true)
-      expect(log.events.length).toBe(172) // 86 pairs × 2
+      expect(log.events.length).toBe(142) // 71 pairs × 2
       // Winner should have exactly POINTS_TO_WIN
       expect(Math.max(result.leftScore, result.rightScore)).toBe(POINTS_TO_WIN)
     })
@@ -49,7 +49,7 @@ describe('Real Game Log Validation', () => {
   describe('Score Tracking', () => {
     it('should track scores correctly', () => {
       // Use a real game log to verify score tracking
-      const logPath = join(__dirname, '..', 'pong-log_events75_1761139604550.json')
+      const logPath = join(__dirname, '..', 'pong-log_events64_1761147732142.json')
       const logData = readFileSync(logPath, 'utf-8')
       const log: CompactLog = JSON.parse(logData)
 
@@ -62,7 +62,7 @@ describe('Real Game Log Validation', () => {
 
     it('should stop at POINTS_TO_WIN', () => {
       // This is tested in real game logs
-      const logPath = join(__dirname, '..', 'pong-log_events67_1761140976543.json')
+      const logPath = join(__dirname, '..', 'pong-log_events19_1761147203682.json')
       const logData = readFileSync(logPath, 'utf-8')
       const log: CompactLog = JSON.parse(logData)
 
@@ -84,7 +84,7 @@ describe('Real Game Log Validation', () => {
       // The check is: if (leftScore > POINTS_TO_WIN || rightScore > POINTS_TO_WIN) { return invalid }
 
       // For now, verify our real game logs all have max score exactly POINTS_TO_WIN
-      const logPath = join(__dirname, '..', 'pong-log_events86_1761139690493.json')
+      const logPath = join(__dirname, '..', 'pong-log_events71_1761147635847.json')
       const logData = readFileSync(logPath, 'utf-8')
       const log: CompactLog = JSON.parse(logData)
 

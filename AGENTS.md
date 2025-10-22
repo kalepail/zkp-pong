@@ -18,8 +18,9 @@ Guidelines within scope of the repo:
   - Event times are derived from x(t) crossing paddle planes; y(t) is computed via reflection.
 
 - Logging contract:
-  - Logs are compact JSON with `v` (version) and `events` only.
+  - Logs are compact JSON with `v` (version), `game_id` (u32), and `events`.
   - `v` must be `1` (current version).
+  - `game_id` is a unique u32 identifier for the game session (used for serve angle entropy).
   - `events` is a single flat array of Q16.16 fixed-point values as decimal strings: `["l0", "r0", "l1", "r1", ...]`.
   - Each event contributes exactly two entries to `events`: leftY, then rightY.
   - No wall-bounce frames or timestamps are persisted; they are implied by hardcoded physics constants and event count.
@@ -55,10 +56,13 @@ Guidelines within scope of the repo:
   - Rendering may convert to JS numbers for canvas APIs, but these must never be persisted or shown in logs or validation reasons.
 
 - Deterministic Serve Angles:
-  - NO RNG SEED is used anymore - physics is fully deterministic based on event count
-  - Serve angle calculation: `angle_deg = -MAX_BOUNCE_ANGLE + ((event_count * SERVE_ANGLE_MULTIPLIER) % ANGLE_RANGE)`
+  - NO RNG SEED is used anymore - physics is fully deterministic based on game_id + event count
+  - Serve angle calculation: `angle_deg = -MAX_BOUNCE_ANGLE + ((((entropy_mix * SERVE_ANGLE_MULTIPLIER) % ANGLE_RANGE) + ANGLE_RANGE) % ANGLE_RANGE)`
+    - Where `entropy_mix = event_count + game_id`
+    - Uses Euclidean modulo `((x % n) + n) % n` to ensure positive remainder (JavaScript % can return negative)
+    - This prevents invalid angles outside the -60° to +60° range
   - This produces deterministic but varied serve angles across volleys
-  - Event count provides natural variation without needing a random seed
+  - Each game has unique serve patterns via game_id, preventing predictability
   - Both frontend and prover use identical formula for consistency
 
 - RISC Zero zkVM Compatibility:
@@ -68,6 +72,11 @@ Guidelines within scope of the repo:
   - Maximum event limit: 10,000 events (5,000 volleys) enforced in prover
   - Frontend should validate event count before export to prevent prover rejection
   - Core library (`prover/core/`) is no_std compatible for zkVM execution
+  - **CRITICAL**: ALWAYS use `RISC0_DEV_MODE=1` when running cargo commands in prover:
+    - `env RISC0_DEV_MODE=1 cargo test` - Run tests (completes in seconds vs 10-30 minutes)
+    - `env RISC0_DEV_MODE=1 cargo run` - Run prover binary
+    - Without this flag, proof generation is extremely slow and impractical for development
+    - Dev mode proofs are NOT secure - only for testing/development
 
 - Cross-Platform Determinism:
   - Initialization functions (`toFixed`, `degToRadFixed`) use `Math.round()` and `Math.PI`

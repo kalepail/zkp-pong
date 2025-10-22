@@ -43,6 +43,8 @@ export interface CompactLog {
   v: 1
   // Flat array of paddle pairs per event: [l0, r0, l1, r1, ...]
   events: NumberLike[]
+  // Unique game identifier (u32 integer) - used for serve angle entropy and replay protection
+  game_id: number
 }
 
 export interface ValidateResult {
@@ -107,11 +109,21 @@ export function runGame(canvas: HTMLCanvasElement) {
   const leftFaceI = iAdd(paddleMarginI, paddleWidthI)
   const rightFaceI = iSub(widthI, iAdd(paddleMarginI, paddleWidthI))
 
+  // Generate unique game ID for this game session (random u32)
+  // This provides per-game entropy for serve angles, preventing predictability
+  function generateGameId(): number {
+    return Math.floor(Math.random() * 0xFFFFFFFF)
+  }
+
+  const gameId = generateGameId()
+
   // Serve towards receiverDir (-1 means serve heading left, 1 means serve heading right)
-  // Angle determined by volley count for deterministic variation
+  // Angle determined by volley count + game_id for deterministic but unpredictable variation
   function serveFixed(receiverDir: -1 | 1, tStart: number, volleyCount: number): FixState {
-    // Calculate deterministic serve angle based on volley count
-    const angleRaw = ((volleyCount * SERVE_ANGLE_MULTIPLIER) % ANGLE_RANGE) - MAX_BOUNCE_ANGLE_DEG
+    // Mix game_id with volley count for serve angle
+    const entropyMix = (volleyCount + gameId) | 0
+    // Use proper modulo to ensure positive remainder (JavaScript % can return negative values)
+    const angleRaw = ((((entropyMix * SERVE_ANGLE_MULTIPLIER) | 0) % ANGLE_RANGE) + ANGLE_RANGE) % ANGLE_RANGE - MAX_BOUNCE_ANGLE_DEG
     const angleI = degToRadFixed(angleRaw)
     const { sin, cos } = cordicSinCos(angleI)
     const vx = iMul(serveSpeedI, iMul(cos, toFixed(receiverDir)))
@@ -250,7 +262,7 @@ export function runGame(canvas: HTMLCanvasElement) {
   rightM.target = fState.rightY
   planTargetsForNextEventFix(fState)
 
-  const log: CompactLog = { v: 1, events: [] }
+  const log: CompactLog = { v: 1, events: [], game_id: gameId }
   const listeners: Array<(s: UpdateCallbackState) => void> = []
 
   function notify() {
@@ -487,6 +499,11 @@ export function runGame(canvas: HTMLCanvasElement) {
 export function validateLog(log: CompactLog): ValidateResult {
   try {
     if (!log || log.v !== 1) return { fair: false, reason: 'Invalid log format', leftScore: 0, rightScore: 0 }
+    if (typeof log.game_id !== 'number' || log.game_id < 0 || log.game_id > 0xFFFFFFFF) {
+      return { fair: false, reason: 'Invalid game_id format (must be u32)', leftScore: 0, rightScore: 0 }
+    }
+
+    const gameId = log.game_id
 
     // Fixed constants
     const widthI = toFixed(WIDTH)
@@ -505,8 +522,10 @@ export function validateLog(log: CompactLog): ValidateResult {
     const rightFaceI = iSub(widthI, iAdd(paddleMarginI, paddleWidthI))
 
     function serve(receiverDir: -1 | 1, tStart: number, volleyCount: number): FixState {
-      // Calculate deterministic serve angle based on volley count
-      const angleRaw = ((volleyCount * SERVE_ANGLE_MULTIPLIER) % ANGLE_RANGE) - MAX_BOUNCE_ANGLE_DEG
+      // Calculate deterministic serve angle mixing volley count + game_id
+      const entropyMix = (volleyCount + gameId) | 0
+      // Use proper modulo to ensure positive remainder (JavaScript % can return negative values)
+      const angleRaw = ((((entropyMix * SERVE_ANGLE_MULTIPLIER) | 0) % ANGLE_RANGE) + ANGLE_RANGE) % ANGLE_RANGE - MAX_BOUNCE_ANGLE_DEG
       const angleI = degToRadFixed(angleRaw)
       const { sin, cos } = cordicSinCos(angleI)
       const vx = iMul(serveSpeedI, iMul(cos, toFixed(receiverDir)))

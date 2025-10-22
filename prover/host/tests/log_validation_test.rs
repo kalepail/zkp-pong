@@ -4,7 +4,7 @@ use core::{CompactLog, ValidateLogInput, ValidateLogOutput};
 use methods::{GUEST_CODE_FOR_ZK_PROOF_ELF, GUEST_CODE_FOR_ZK_PROOF_ID};
 use risc0_zkvm::{default_prover, ExecutorEnv};
 
-fn load_and_parse_log(path: &str) -> Vec<i64> {
+fn load_and_parse_log(path: &str) -> (Vec<i64>, u32) {
     let raw = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("Failed to read {}: {}", path, e));
 
@@ -22,14 +22,14 @@ fn load_and_parse_log(path: &str) -> Vec<i64> {
         })
         .collect();
 
-    events
+    (events, log.game_id)
 }
 
 #[test]
-fn test_valid_game_67_events() {
-    let events = load_and_parse_log("../../pong-log_events67_1761140976543.json");
+fn test_valid_game_19_events() {
+    let (events, game_id) = load_and_parse_log("../../pong-log_events19_1761147203682.json");
 
-    let input = ValidateLogInput { events };
+    let input = ValidateLogInput { events, game_id };
 
     let env = ExecutorEnv::builder()
         .write(&input)
@@ -52,14 +52,14 @@ fn test_valid_game_67_events() {
 
     assert!(output.fair, "Game should be fair");
     assert!(output.reason.is_none(), "Should not have error reason");
-    assert_eq!(output.events_len, 134, "Expected 134 events (67 pairs)");
+    assert_eq!(output.events_len, 38, "Expected 38 events (19 pairs)");
 }
 
 #[test]
-fn test_valid_game_75_events() {
-    let events = load_and_parse_log("../../pong-log_events75_1761139604550.json");
+fn test_valid_game_64_events() {
+    let (events, game_id) = load_and_parse_log("../../pong-log_events64_1761147732142.json");
 
-    let input = ValidateLogInput { events };
+    let input = ValidateLogInput { events, game_id };
 
     let env = ExecutorEnv::builder()
         .write(&input)
@@ -82,14 +82,14 @@ fn test_valid_game_75_events() {
 
     assert!(output.fair, "Game should be fair");
     assert!(output.reason.is_none(), "Should not have error reason");
-    assert_eq!(output.events_len, 150, "Expected 150 events (75 pairs)");
+    assert_eq!(output.events_len, 128, "Expected 128 events (64 pairs)");
 }
 
 #[test]
-fn test_valid_game_86_events() {
-    let events = load_and_parse_log("../../pong-log_events86_1761139690493.json");
+fn test_valid_game_71_events() {
+    let (events, game_id) = load_and_parse_log("../../pong-log_events71_1761147635847.json");
 
-    let input = ValidateLogInput { events };
+    let input = ValidateLogInput { events, game_id };
 
     let env = ExecutorEnv::builder()
         .write(&input)
@@ -112,5 +112,5 @@ fn test_valid_game_86_events() {
 
     assert!(output.fair, "Game should be fair");
     assert!(output.reason.is_none(), "Should not have error reason");
-    assert_eq!(output.events_len, 172, "Expected 172 events (86 pairs)");
+    assert_eq!(output.events_len, 142, "Expected 142 events (71 pairs)");
 }
