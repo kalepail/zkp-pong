@@ -25,5 +25,4 @@ chrono = "0.4"
 
 [features]
 default = []
-cuda = ["risc0-zkvm/cuda"]
-metal = ["risc0-zkvm/metal"]
+cuda = ["risc0-zkvm/cuda", "risc0-groth16/cuda"]
