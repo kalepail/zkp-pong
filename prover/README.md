@@ -53,34 +53,99 @@ cargo build --release
 
 ## Usage
 
-**Generate and verify proof for a match log:**
+The prover binary has two commands: `prove` and `verify`.
+
+### Prove Command
+
+Generate a cryptographic proof for a game log:
+
 ```bash
-cargo run --release -- <path-to-log.json>
+./target/release/pong-prover prove <log_file> [--format <type>] [output_file]
 ```
 
 **Example:**
 ```bash
-cargo run --release -- ../pong-log_events67_1761140976543.json
+./target/release/pong-prover prove pong-log.json --format succinct
 ```
 
 **Output:**
 ```
-Loaded 98 events from ../pong-log_events67_1761140976543.json
-Generating proof...
-Verifying proof...
+🎮 RISC Zero Pong Proof System
+======================================================================
 
-Proof verified successfully!
-Result: FAIR GAME
-Log Hash: 0x7a3f2b1c...
-Events Processed: 98
-3-0
+📋 Generating proof for game log
+  Log file: pong-log.json
+  Receipt format: succinct
+
+📦 Loaded 98 events from log
+  Game ID: 3829561234
+
+🔐 Generating proof (this may take a while)...
+  Proving time: 12.45s
+
+✅ Proof generated successfully!
+  Result: FAIR GAME
+  Score: 3-0
+  Log Hash: 0x7a3f2b1c...
+  Events Processed: 98
+  Receipt Size: 187342 bytes
+
+💾 Proof saved to: pong-proof_game3829561234_1738234567.json
+   Use 'verify pong-proof_game3829561234_1738234567.json' to cryptographically verify this proof
+======================================================================
 ```
 
-## Development Mode
+**Receipt Format Options:**
+- `composite`: Fastest proving, largest size (~MB)
+- `succinct`: Balanced, medium size (~200 KB) - **recommended**
+- `groth16`: Slowest proving, smallest size (~200-300 bytes)
+
+### Verify Command
+
+Cryptographically verify a proof (very fast, ~0.1s):
+
+```bash
+./target/release/pong-prover verify <proof_file>
+```
+
+**Example:**
+```bash
+./target/release/pong-prover verify pong-proof_game3829561234_1738234567.json
+```
+
+**Output:**
+```
+🎮 RISC Zero Pong Proof System
+======================================================================
+
+📋 Verifying proof
+  Proof file: pong-proof_game3829561234_1738234567.json
+
+📦 Loaded proof
+  Game ID: 3829561234
+  Receipt format: succinct
+  Receipt size: 187342 bytes
+
+🔐 Verifying receipt cryptographically...
+  Verification time: 0.08s
+
+✅ Receipt cryptographically verified!
+
+The proof cryptographically attests that:
+  1. The game log was correctly validated
+  2. The game was FAIR
+  3. Final score: 3-0
+  4. The computation was executed correctly in the zkVM
+
+🎊 This game result is cryptographically verified!
+======================================================================
+```
+
+### Development Mode
 
 For faster iteration without actual proof generation:
 ```bash
-RISC0_DEV_MODE=1 cargo run --release -- <log.json>
+RISC0_DEV_MODE=1 ./target/release/pong-prover prove <log.json>
 ```
 
 This skips cryptographic proof generation but still validates the log logic.
