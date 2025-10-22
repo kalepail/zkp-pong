@@ -6,6 +6,7 @@ edition = "2021"
 [workspace]
 
 [dependencies]
+core = { path = "../../core", default-features = false }
 risc0-zkvm = { version = "3.0.3", default-features = false, features = ["std"] }
 serde = { version = "1.0", features = ["derive"], default-features = false }
 sha2 = { version = "0.10", default-features = false }

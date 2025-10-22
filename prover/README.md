@@ -10,6 +10,9 @@ This prover validates Pong match logs inside a RISC Zero zkVM environment, gener
 
 ```
 prover/
+├── core/                   # Shared types and utilities (no_std compatible)
+│   ├── src/lib.rs         # ValidateLogInput, ValidateLogOutput, hash computation
+│   └── Cargo.toml
 ├── host/                   # Prover host program
 │   ├── src/main.rs        # CLI entry point, proof orchestration
 │   └── Cargo.toml
@@ -18,8 +21,9 @@ prover/
 │   │   ├── src/
 │   │   │   ├── main.rs    # zkVM entry point
 │   │   │   ├── physics.rs # Game physics validation
-│   │   │   ├── fixed.rs   # Fixed-point math (Q32.32)
-│   │   │   └── types.rs   # Data structures and hashing
+│   │   │   ├── fixed.rs   # Fixed-point math (Q16.16)
+│   │   │   ├── constants.rs # Hardcoded game configuration
+│   │   │   └── types.rs   # Re-exports from core
 │   │   └── Cargo.toml
 │   ├── build.rs           # Guest build script (risc0-build)
 │   └── Cargo.toml
@@ -56,12 +60,12 @@ cargo run --release -- <path-to-log.json>
 
 **Example:**
 ```bash
-cargo run --release -- ../pong-log_seed930397884_events49_1757552715309.json
+cargo run --release -- ../pong-log_events67_1761140976543.json
 ```
 
 **Output:**
 ```
-Loaded 98 events from ../pong-log_seed930397884_events49_1757552715309.json
+Loaded 98 events from ../pong-log_events67_1761140976543.json
 Generating proof...
 Verifying proof...
 
@@ -95,30 +99,42 @@ RISC0_DEV_MODE=1 cargo test
 
 ## How It Works
 
+### Core Library (`core/src/lib.rs`)
+
+Shared `no_std`-compatible library used by both host and guest:
+- `ValidateLogInput`: Input structure containing event array
+- `ValidateLogOutput`: Output structure with validation result, scores, and SHA-256 hash
+- `CompactLog`: JSON deserialization format with version field
+- `compute_log_hash()`: Deterministic SHA-256 hash computation with "PONGLOGv1" prefix
+
 ### Host (`host/src/main.rs`)
 
-1. Loads match log JSON from file
-2. Parses config and events into `ValidateLogInput`
-3. Creates zkVM execution environment with input
-4. Generates proof using RISC Zero prover
-5. Verifies proof and decodes public output
-6. Prints result (fair/unfair, score, log hash)
+1. Loads match log JSON from file (with size limit protection)
+2. Parses `CompactLog` with version validation
+3. Converts event strings to Q16.16 integers (`i64`)
+4. Creates `ValidateLogInput` with events array
+5. Builds zkVM execution environment
+6. Generates proof using RISC Zero prover
+7. Verifies proof and decodes public `ValidateLogOutput`
+8. Prints result (fair/unfair, score, log hash)
 
 ### Guest (`methods/guest/src/main.rs`)
 
 Runs inside RISC Zero zkVM:
 
 1. Reads `ValidateLogInput` from environment
-2. Validates game configuration bounds
-3. Initializes deterministic RNG with seed
+2. Loads hardcoded game constants from `constants.rs`
+3. Initializes game state with deterministic serve (based on event count)
 4. Replays match using fixed-point physics
-5. Checks each event for:
+5. Checks each event pair for:
+   - Kinematics validity (positive time to paddle plane)
    - Paddle reachability (max speed constraints)
    - Paddle bounds (within field)
    - Hit detection (ball-paddle collision)
    - Physics consistency (deterministic bounces)
-6. Computes SHA-256 hash of config + events
-7. Commits public output: `ValidateLogOutput`
+6. Validates final score (exactly one player reaches `POINTS_TO_WIN`)
+7. Computes SHA-256 hash of events with "PONGLOGv1" prefix
+8. Commits public output: `ValidateLogOutput`
 
 ### Public Output
 
@@ -135,12 +151,14 @@ struct ValidateLogOutput {
 
 ## Validation Rules
 
-1. **Config Validation**: Dimensions, speeds, angles within sane bounds
-2. **Kinematics**: Ball velocity must reach paddle plane in positive time
+1. **Event Structure**: Must have pairs of events (leftY, rightY), non-empty, under 10K event limit
+2. **Kinematics**: Ball velocity must reach paddle plane in positive time (`dt > 0`)
 3. **Reachability**: Paddle movement ≤ `max_speed * dt` between events
 4. **Bounds**: Paddles stay within field boundaries
-5. **Determinism**: Bounces computed using seed-based RNG and fixed-point math
-6. **Time Safety**: No overflow detection (protected by 10K event limit)
+5. **Determinism**: Bounces computed using event-count-based serve angles and fixed-point math
+6. **Final Score**: Exactly one player must reach `POINTS_TO_WIN` (3), no ties allowed
+7. **Time Safety**: Overflow detection (effectively unlimited with Q16.16 and 10K event limit)
+8. **Commitment**: SHA-256 hash with "PONGLOGv1" prefix binds proof to specific events
 
 ## Performance
 

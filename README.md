@@ -7,7 +7,7 @@ Deterministic Pong with zero-knowledge proof validation. Play Pong in your brows
 This project demonstrates provably fair game mechanics using zero-knowledge proofs. The game runs entirely client-side with deterministic physics based on integer math. Match logs can be cryptographically verified to prove no cheating occurred.
 
 **Key Features:**
-- Deterministic Pong engine using fixed-point arithmetic (Q32.32)
+- Deterministic Pong engine using fixed-point arithmetic (Q16.16)
 - Compact match logging (paddle positions at impact events only)
 - Client-side validation and ZK proof generation
 - RISC Zero zkVM prover for trustless verification
@@ -22,6 +22,13 @@ This project demonstrates provably fair game mechanics using zero-knowledge proo
 │   │   ├── engine.ts      # Game engine and validation logic
 │   │   └── fixed.ts       # Fixed-point math utilities
 ├── prover/                # Rust RISC Zero prover (see prover/README.md)
+│   ├── core/              # Shared types and hashing logic (no_std compatible)
+│   ├── host/              # Prover host program (proof generation)
+│   ├── methods/           # Guest code (runs inside zkVM)
+│   └── Cargo.toml         # Workspace configuration
+├── test/                  # TypeScript test suite
+│   ├── engine.test.ts     # Game engine tests
+│   └── log-validation.test.ts  # Log validation tests
 ├── index.html             # Entry point
 ├── package.json
 └── *.json                 # Example match logs
@@ -51,22 +58,25 @@ pnpm preview
 
 ### Game Mechanics
 
-1. **Deterministic Physics**: All calculations use 64-bit fixed-point integers (Q32.32 format) to ensure identical results across platforms
+1. **Deterministic Physics**: All calculations use 64-bit fixed-point integers (Q16.16 format) to ensure identical results across platforms
 2. **Event-Driven**: Game state only changes at discrete events (paddle impacts or misses)
 3. **Compact Logging**: Only paddle Y positions at each event are logged, reducing log size by ~95%
 4. **AI Opponents**: Both paddles use deterministic AI with configurable aim offset and jitter
 
 ### Match Logs
 
-Logs are JSON files containing:
-- `config`: Game parameters (seed, dimensions, speeds, angles, etc.)
-- `events`: Flat array of paddle positions `[leftY0, rightY0, leftY1, rightY1, ...]`
+Logs are compact JSON files containing:
+- `v`: Version number (currently 1)
+- `events`: Flat array of paddle Y positions in Q16.16 fixed-point format `["leftY0", "rightY0", "leftY1", "rightY1", ...]`
   - Each volley = 2 events (leftY, rightY)
-  - Example: 49 volleys = 98 events in `pong-log_seed930397884_events49_*.json`
+  - Values are stored as decimal strings (e.g., "3145728" = 48.0 in Q16.16)
+  - Example: 49 volleys = 98 events
+
+**Note:** Game configuration (dimensions, speeds, angles) is hardcoded in both frontend and prover for simplicity and consistency. Physics is fully deterministic based on event count - no seed needed.
 
 ### Game Controls
 
-- **Start Match**: Begin new game with random seed
+- **Start Match**: Begin new game
 - **Validate Log**: Client-side validation of current log
 - **Download Log**: Save match log as JSON
 - **Upload Log**: Load and validate existing match log

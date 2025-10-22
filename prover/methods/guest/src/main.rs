@@ -21,15 +21,15 @@ fn main() {
 
 fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
     // Use hardcoded constants for all config values
-    let width = to_fixed_int(WIDTH as i128);
-    let height = to_fixed_int(HEIGHT as i128);
-    let ball_radius = to_fixed_int(BALL_RADIUS as i128);
-    let paddle_height = to_fixed_int(PADDLE_HEIGHT as i128);
-    let paddle_width = to_fixed_int(PADDLE_WIDTH as i128);
-    let paddle_margin = to_fixed_int(PADDLE_MARGIN as i128);
-    let paddle_max_speed = to_fixed_int(PADDLE_MAX_SPEED as i128);
-    let serve_speed = to_fixed_int(SERVE_SPEED as i128);
-    let speed_increment = to_fixed_int(SPEED_INCREMENT as i128);
+    let width = to_fixed_int(WIDTH as i64);
+    let height = to_fixed_int(HEIGHT as i64);
+    let ball_radius = to_fixed_int(BALL_RADIUS as i64);
+    let paddle_height = to_fixed_int(PADDLE_HEIGHT as i64);
+    let paddle_width = to_fixed_int(PADDLE_WIDTH as i64);
+    let paddle_margin = to_fixed_int(PADDLE_MARGIN as i64);
+    let paddle_max_speed = to_fixed_int(PADDLE_MAX_SPEED as i64);
+    let serve_speed = to_fixed_int(SERVE_SPEED as i64);
+    let speed_increment = to_fixed_int(SPEED_INCREMENT as i64);
     let max_bounce_angle = deg_to_rad_fixed(MAX_BOUNCE_ANGLE_DEG);
 
     let y_min = ball_radius;
@@ -93,7 +93,7 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
         let t_hit = state.t0 + dt_to_paddle;
 
         // Time overflow detection
-        // With Q32.32 format, max time is ~2^95 seconds (effectively unlimited for games)
+        // With Q16.16 format, max time is ~2^47 seconds (effectively unlimited for games)
         // Event limit (10,000) ensures this check never triggers in practice
         // Included for defense-in-depth and mathematical completeness
         if t_hit < state.t0 {
