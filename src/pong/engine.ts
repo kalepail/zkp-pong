@@ -494,6 +494,277 @@ export function runGame(canvas: HTMLCanvasElement) {
   return { cancel, getLog, onUpdate: onUpdateWrapper }
 }
 
+// ================= Replay =================
+
+export function replayLog(canvas: HTMLCanvasElement, log: CompactLog) {
+  const ctx = canvas.getContext('2d')!
+
+  // Fixed constants (same as runGame)
+  const widthI = toFixed(WIDTH)
+  const heightI = toFixed(HEIGHT)
+  const ballRadiusI = toFixed(BALL_RADIUS)
+  const paddleHeightI = toFixed(PADDLE_HEIGHT)
+  const paddleWidthI = toFixed(PADDLE_WIDTH)
+  const paddleMarginI = toFixed(PADDLE_MARGIN)
+  const paddleMaxSpeedI = toFixed(PADDLE_MAX_SPEED)
+  const serveSpeedI = toFixed(SERVE_SPEED)
+  const speedIncrementI = toFixed(SPEED_INCREMENT)
+  const maxBounceAngleI = degToRadFixed(MAX_BOUNCE_ANGLE_DEG)
+
+  const yMinI = ballRadiusI
+  const yMaxI = iSub(heightI, ballRadiusI)
+  const leftFaceI = iAdd(paddleMarginI, paddleWidthI)
+  const rightFaceI = iSub(widthI, iAdd(paddleMarginI, paddleWidthI))
+
+  const gameId = log.game_id
+
+  function serveFixed(receiverDir: -1 | 1, tStart: number, volleyCount: number): FixState {
+    const entropyMix = (volleyCount + gameId) | 0
+    const angleRaw = ((((entropyMix * SERVE_ANGLE_MULTIPLIER) | 0) % ANGLE_RANGE) + ANGLE_RANGE) % ANGLE_RANGE - MAX_BOUNCE_ANGLE_DEG
+    const angleI = degToRadFixed(angleRaw)
+    const { sin, cos } = cordicSinCos(angleI)
+    const vx = iMul(serveSpeedI, iMul(cos, toFixed(receiverDir)))
+    const vy = iMul(serveSpeedI, sin)
+    return {
+      t0: toFixed(tStart),
+      x: iDiv(widthI, toFixed(2)),
+      y: iDiv(heightI, toFixed(2)),
+      vx,
+      vy,
+      speed: serveSpeedI,
+      leftY: iDiv(heightI, toFixed(2)),
+      rightY: iDiv(heightI, toFixed(2)),
+      dir: receiverDir,
+    }
+  }
+
+  function timeToPaddleFixed(fs: FixState): I {
+    if (fs.vx === 0n) {
+      throw new Error('Invalid velocity: vx is zero')
+    }
+    const targetX = fs.dir < 0 ? iAdd(leftFaceI, ballRadiusI) : iSub(rightFaceI, ballRadiusI)
+    return iDiv(iSub(targetX, fs.x), fs.vx)
+  }
+
+  // Paddle motion model
+  type PaddleMotion = { y0: I; t0: I; target: I }
+  const centerYI = iDiv(heightI, toFixed(2))
+  let leftM: PaddleMotion = { y0: centerYI, t0: 0n as I, target: centerYI }
+  let rightM: PaddleMotion = { y0: centerYI, t0: 0n as I, target: centerYI }
+
+  function paddleYAtFixed(m: PaddleMotion, tAbsI: I): I {
+    const dtI = iMax(0n as I, iSub(tAbsI, m.t0))
+    const dist = iAbs(iSub(m.target, m.y0))
+    const step = iMin(dist, iMul(paddleMaxSpeedI, dtI))
+    const dir = iSub(m.target, m.y0) >= 0n ? 1n as I : -1n as I
+    const halfI = iDiv(paddleHeightI, toFixed(2))
+    return clampPaddleY_fixed(iAdd(m.y0, (step * (dir as unknown as bigint)) as unknown as I), halfI, heightI)
+  }
+
+  // Initialize state
+  const replayStartTime = performance.now() / 1000
+  let fState: FixState = serveFixed(INITIAL_SERVE_DIRECTION, replayStartTime, 0)
+  let leftScore = 0
+  let rightScore = 0
+  let eventIdx = 0
+  let ended = false
+
+  const eventsLen = Array.isArray(log.events) ? log.events.length : 0
+  const eventCount = eventsLen / 2
+
+  // Initialize paddle motion
+  leftM.t0 = fState.t0
+  rightM.t0 = fState.t0
+  leftM.y0 = fState.leftY
+  rightM.y0 = fState.rightY
+  leftM.target = fState.leftY
+  rightM.target = fState.rightY
+
+  // Helper to set paddle targets for the next event
+  function setPaddleTargetsForNextEvent() {
+    if (eventIdx >= eventCount) return
+
+    const rawL = log.events[eventIdx * 2]
+    const rawR = log.events[eventIdx * 2 + 1]
+    const loggedLI: I = typeof rawL === 'string' ? (BigInt(rawL) as unknown as I) : toFixed(rawL)
+    const loggedRI: I = typeof rawR === 'string' ? (BigInt(rawR) as unknown as I) : toFixed(rawR)
+
+    // Update paddle motion to start moving toward logged positions NOW
+    const leftCurrentY = paddleYAtFixed(leftM, fState.t0)
+    const rightCurrentY = paddleYAtFixed(rightM, fState.t0)
+    leftM = { y0: leftCurrentY, t0: fState.t0, target: loggedLI }
+    rightM = { y0: rightCurrentY, t0: fState.t0, target: loggedRI }
+  }
+
+  // Set initial paddle targets for first event
+  setPaddleTargetsForNextEvent()
+
+  const listeners: Array<(s: UpdateCallbackState) => void> = []
+  function notify() {
+    const payload: UpdateCallbackState = {
+      leftScore,
+      rightScore,
+      ended,
+    }
+    listeners.forEach((cb) => cb(payload))
+  }
+
+  function onUpdate(cb: (s: UpdateCallbackState) => void) {
+    listeners.push(cb)
+  }
+
+  let rafId = 0
+  let cancelled = false
+
+  // Process next event using actual physics timing
+  function step(): void {
+    if (ended || eventIdx >= eventCount) return
+
+    // Compute time to next paddle-plane event
+    const dtToPaddleI = timeToPaddleFixed(fState)
+    const tHitI = iAdd(fState.t0, dtToPaddleI)
+    const yAtHitI = reflect1D_fixed(fState.y, fState.vy, dtToPaddleI, yMinI, yMaxI)
+
+    // By the time we reach here, paddles should have been animating toward logged positions
+    // Get their positions at the event time (tHitI)
+    const leftYAtHitI = paddleYAtFixed(leftM, tHitI)
+    const rightYAtHitI = paddleYAtFixed(rightM, tHitI)
+
+    // Determine hit/miss
+    const movingLeft = fState.dir < 0
+    const half = PADDLE_HEIGHT / 2
+    const yAtHit = fromFixed(yAtHitI)
+    const leftYAtHit = fromFixed(leftYAtHitI)
+    const rightYAtHit = fromFixed(rightYAtHitI)
+    const hit = movingLeft
+      ? Math.abs(leftYAtHit - yAtHit) <= half + BALL_RADIUS
+      : Math.abs(rightYAtHit - yAtHit) <= half + BALL_RADIUS
+
+    // Advance kinematics to tHit
+    fState.x = movingLeft ? iAdd(leftFaceI, ballRadiusI) : iSub(rightFaceI, ballRadiusI)
+    fState.y = yAtHitI
+    fState.t0 = tHitI
+    fState.leftY = leftYAtHitI
+    fState.rightY = rightYAtHitI
+
+    if (hit) {
+      // Bounce - use the actual paddle position where the ball hit
+      const paddleYI = movingLeft ? leftYAtHitI : rightYAtHitI
+      const halfI = iDiv(paddleHeightI, toFixed(2))
+      const limit = iAdd(halfI, ballRadiusI)
+      const offsetI = iMax(iSub(0n as I, limit), iMin(limit, iSub(fState.y, paddleYI)))
+      const normI = iDiv(offsetI, limit)
+      const angleI = iMax(iSub(0n as I, maxBounceAngleI), iMin(maxBounceAngleI, iMul(normI, maxBounceAngleI)))
+      const newSpeed = iAdd(fState.speed, speedIncrementI)
+      const newDir: -1 | 1 = fState.dir < 0 ? 1 : -1
+      const { sin, cos } = cordicSinCos(angleI)
+      fState.vx = iMul(newSpeed, iMul(cos, toFixed(newDir)))
+      fState.vy = iMul(newSpeed, sin)
+      fState.speed = newSpeed
+      fState.dir = newDir
+    } else {
+      // Miss
+      if (movingLeft) rightScore++
+      else leftScore++
+
+      notify()
+
+      if (leftScore >= POINTS_TO_WIN || rightScore >= POINTS_TO_WIN) {
+        ended = true
+        notify()
+        return
+      }
+
+      // Serve toward scorer
+      const receiverDir: -1 | 1 = movingLeft ? 1 : -1
+      const processedEvents = (eventIdx + 1) * 2
+      fState = serveFixed(receiverDir, fromFixed(fState.t0), processedEvents)
+      fState.leftY = leftYAtHitI
+      fState.rightY = rightYAtHitI
+
+      // Reset paddle motion to current positions
+      leftM = { y0: leftYAtHitI, t0: fState.t0, target: leftYAtHitI }
+      rightM = { y0: rightYAtHitI, t0: fState.t0, target: rightYAtHitI }
+    }
+
+    eventIdx++
+    notify()
+
+    // Now that we've processed this event, set paddle targets for the NEXT event
+    // This gives paddles time to animate toward their next positions
+    setPaddleTargetsForNextEvent()
+  }
+
+  function draw(tAbs: number) {
+    ctx.clearRect(0, 0, WIDTH, HEIGHT)
+
+    // Midline
+    ctx.strokeStyle = '#333'
+    ctx.beginPath()
+    ctx.setLineDash([6, 6])
+    ctx.moveTo(WIDTH / 2, 0)
+    ctx.lineTo(WIDTH / 2, HEIGHT)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    // Paddles
+    ctx.fillStyle = '#0f0'
+    const half = PADDLE_HEIGHT / 2
+    const tAbsI = toFixed(tAbs)
+    const leftYNow = fromFixed(paddleYAtFixed(leftM, tAbsI))
+    const rightYNow = fromFixed(paddleYAtFixed(rightM, tAbsI))
+    ctx.fillRect(PADDLE_MARGIN, leftYNow - half, PADDLE_WIDTH, PADDLE_HEIGHT)
+    ctx.fillRect(WIDTH - PADDLE_MARGIN - PADDLE_WIDTH, rightYNow - half, PADDLE_WIDTH, PADDLE_HEIGHT)
+
+    // Ball position using analytical reflection
+    const dtI = iSub(tAbsI, fState.t0)
+    const bx = fromFixed(iAdd(fState.x, iMul(fState.vx, dtI)))
+    const by = fromFixed(reflect1D_fixed(fState.y, fState.vy, dtI, yMinI, yMaxI))
+    ctx.fillStyle = '#fff'
+    ctx.beginPath()
+    ctx.arc(bx, by, BALL_RADIUS, 0, Math.PI * 2)
+    ctx.fill()
+
+    // Score
+    ctx.fillStyle = '#fff'
+    ctx.font = '16px sans-serif'
+    ctx.fillText(`${leftScore}`, WIDTH * 0.25, 24)
+    ctx.fillText(`${rightScore}`, WIDTH * 0.75, 24)
+  }
+
+  // Animation loop - exactly like runGame
+  function render() {
+    if (cancelled || ended) return
+    const now = performance.now() / 1000
+
+    // Next paddle impact time
+    const tHit = fromFixed(iAdd(fState.t0, timeToPaddleFixed(fState)))
+
+    // If we've reached the event time, process it
+    if (now >= tHit - 1e-4) {
+      step()
+    }
+
+    // Draw current frame
+    draw(now)
+
+    if (!ended) {
+      rafId = requestAnimationFrame(render)
+    }
+  }
+
+  function cancel() {
+    cancelled = true
+    if (rafId) cancelAnimationFrame(rafId)
+  }
+
+  // Start replay
+  draw(replayStartTime)
+  rafId = requestAnimationFrame(render)
+
+  return { cancel, onUpdate }
+}
+
 // ================= Validation =================
 
 export function validateLog(log: CompactLog): ValidateResult {
