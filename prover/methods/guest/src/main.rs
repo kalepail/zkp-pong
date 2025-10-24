@@ -1,5 +1,7 @@
 use risc0_zkvm::guest::env;
 
+extern crate alloc;
+
 mod constants;
 mod fixed;
 mod physics;
@@ -70,6 +72,31 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
     }
     if events.len() % 2 != 0 {
         return ValidateLogOutput::invalid("Events must be pairs");
+    }
+
+    // Verify commitment count matches event count
+    if inp.commitments.len() != events.len() {
+        return ValidateLogOutput::invalid("Commitment count must match event count");
+    }
+
+    // Verify all commitments before processing game logic
+    // This uses SHA-256 hardware accelerator for ~68 cycles per commitment
+    for (idx, &paddle_y) in events.iter().enumerate() {
+        // Determine which player's seed to use (even = left, odd = right)
+        let is_left = idx % 2 == 0;
+        let seed = if is_left {
+            &inp.player_left_seed
+        } else {
+            &inp.player_right_seed
+        };
+
+        // Compute expected commitment: SHA256(seed || event_index || paddle_y)
+        let expected = core::compute_commitment(seed, idx as u32, paddle_y);
+
+        // Verify commitment matches
+        if expected != inp.commitments[idx].0 {
+            return ValidateLogOutput::invalid("Commitment verification failed");
+        }
     }
 
     let mut processed_events = 0u32; // Track total events processed to match log.events.length

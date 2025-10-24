@@ -81,12 +81,15 @@ function formatLog(log: any): string {
   const ordered = {
     v: log.v,
     game_id: log.game_id,
-    events: log.events
+    events: log.events,
+    commitments: log.commitments,
+    player_left_seed: log.player_left_seed,
+    player_right_seed: log.player_right_seed
   }
   return JSON.stringify(ordered, null, 2)
 }
 
-startBtn.onclick = () => {
+startBtn.onclick = async () => {
   if (currentCancel) {
     currentCancel()
     currentCancel = null
@@ -96,7 +99,7 @@ startBtn.onclick = () => {
   logArea.value = ''
   currentLog = null
 
-  const { cancel, onUpdate, getLog } = runGame(canvas)
+  const { cancel, onUpdate, getLog } = await runGame(canvas)
 
   currentCancel = cancel
   validateBtn.disabled = true

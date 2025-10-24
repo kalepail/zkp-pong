@@ -1,4 +1,4 @@
-use core::{CompactLog, ValidateLogInput, ValidateLogOutput};
+use core::{CompactLog, Commitment32, ValidateLogInput, ValidateLogOutput};
 use methods::{GUEST_CODE_FOR_ZK_PROOF_ELF, GUEST_CODE_FOR_ZK_PROOF_ID};
 use risc0_zkvm::{default_prover, ExecutorEnv, ProverOpts, Receipt};
 use serde::{Deserialize, Serialize};
@@ -121,9 +121,42 @@ pub fn generate_pong_proof(
         events.push(v_q16);
     }
 
+    // Parse commitments (hex-encoded SHA-256 hashes)
+    let mut commitments: Vec<Commitment32> = Vec::with_capacity(log.commitments.len());
+    for comm_hex in log.commitments.iter() {
+        let comm_bytes = hex::decode(comm_hex)
+            .map_err(|e| format!("Error decoding commitment hex: {}", e))?;
+        if comm_bytes.len() != 32 {
+            return Err(format!("Invalid commitment length: expected 32 bytes, got {}", comm_bytes.len()).into());
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&comm_bytes);
+        commitments.push(Commitment32(arr));
+    }
+
+    // Parse player seeds (hex-encoded random 32-byte values)
+    let left_seed_bytes = hex::decode(&log.player_left_seed)
+        .map_err(|e| format!("Error decoding left player seed: {}", e))?;
+    if left_seed_bytes.len() != 32 {
+        return Err(format!("Invalid left player seed length: expected 32 bytes, got {}", left_seed_bytes.len()).into());
+    }
+    let mut player_left_seed = [0u8; 32];
+    player_left_seed.copy_from_slice(&left_seed_bytes);
+
+    let right_seed_bytes = hex::decode(&log.player_right_seed)
+        .map_err(|e| format!("Error decoding right player seed: {}", e))?;
+    if right_seed_bytes.len() != 32 {
+        return Err(format!("Invalid right player seed length: expected 32 bytes, got {}", right_seed_bytes.len()).into());
+    }
+    let mut player_right_seed = [0u8; 32];
+    player_right_seed.copy_from_slice(&right_seed_bytes);
+
     let input = ValidateLogInput {
         events,
         game_id: log.game_id,
+        commitments,
+        player_left_seed,
+        player_right_seed,
     };
 
     // Build execution environment

@@ -3,6 +3,11 @@
 
 import type { I } from './fixed'
 import {
+  generateCommitmentSeed,
+  computeCommitment,
+  bytesToHex,
+} from './commitment'
+import {
   toFixed,
   fromFixed,
   iAdd,
@@ -45,6 +50,12 @@ export interface CompactLog {
   events: NumberLike[]
   // Unique game identifier (u32 integer) - used for serve angle entropy and replay protection
   game_id: number
+  // SHA-256 commitments for each event (hex-encoded, 32 bytes each) - optional for legacy tests
+  commitments?: string[]
+  // Revealed seed for left player (hex-encoded, 32 bytes) - optional for legacy tests
+  player_left_seed?: string
+  // Revealed seed for right player (hex-encoded, 32 bytes) - optional for legacy tests
+  player_right_seed?: string
 }
 
 export interface ValidateResult {
@@ -89,8 +100,16 @@ interface UpdateCallbackState {
   ended: boolean
 }
 
-export function runGame(canvas: HTMLCanvasElement) {
+export async function runGame(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext('2d')!
+
+  // Generate random commitment seeds for both players
+  const playerLeftCommitment = generateCommitmentSeed()
+  const playerRightCommitment = generateCommitmentSeed()
+  console.log('Generated player commitment seeds:', {
+    leftSeed: bytesToHex(playerLeftCommitment.seed),
+    rightSeed: bytesToHex(playerRightCommitment.seed),
+  })
 
   // Fixed constants
   const widthI = toFixed(WIDTH)
@@ -262,7 +281,14 @@ export function runGame(canvas: HTMLCanvasElement) {
   rightM.target = fState.rightY
   planTargetsForNextEventFix(fState)
 
-  const log: CompactLog = { v: 1, events: [], game_id: gameId }
+  const log: CompactLog = {
+    v: 1,
+    events: [],
+    game_id: gameId,
+    commitments: [],
+    player_left_seed: bytesToHex(playerLeftCommitment.seed),
+    player_right_seed: bytesToHex(playerRightCommitment.seed),
+  }
   const listeners: Array<(s: UpdateCallbackState) => void> = []
 
   function notify() {
@@ -279,7 +305,7 @@ export function runGame(canvas: HTMLCanvasElement) {
   }
 
   // Advance simulation to next paddle-plane event.
-  function step(): void {
+  async function step(): Promise<void> {
     if (state.ended) return
 
     // Enforce event limit to match prover's MAX_EVENTS constraint
@@ -308,9 +334,27 @@ export function runGame(canvas: HTMLCanvasElement) {
       ? Math.abs(leftYAtHit - yAtHit) <= half + BALL_RADIUS
       : Math.abs(rightYAtHit - yAtHit) <= half + BALL_RADIUS
 
-    // Log both paddle positions at impact/miss time
-    // Persist fixed-point integers as strings for exactness
-    log.events.push(leftYAtHitI.toString(), rightYAtHitI.toString())
+    // Compute commitments and log both paddle positions at impact/miss time
+    // Left player commits their position (even index)
+    const leftEventIndex = log.events.length
+    const leftCommitment = await computeCommitment(
+      playerLeftCommitment.seed,
+      leftEventIndex,
+      leftYAtHitI.toString()
+    )
+    log.events.push(leftYAtHitI.toString())
+    log.commitments!.push(leftCommitment)
+
+    // Right player commits their position (odd index)
+    const rightEventIndex = log.events.length
+    const rightCommitment = await computeCommitment(
+      playerRightCommitment.seed,
+      rightEventIndex,
+      rightYAtHitI.toString()
+    )
+    log.events.push(rightYAtHitI.toString())
+    log.commitments!.push(rightCommitment)
+
     console.log('GAME event ' + JSON.stringify({
       idx: Math.floor(log.events.length / 2) - 1,
       dir: fState.dir,
@@ -411,14 +455,17 @@ export function runGame(canvas: HTMLCanvasElement) {
   // The step() function itself is purely deterministic (fixed-point math with deterministic serve angles)
   // Rendering converts fixed-point to float for display only - never logged
   let rafId = 0
-  function render() {
+  let stepping = false
+  async function render() {
     if (state.ended) return
     const now = performance.now() / 1000 // ← Non-deterministic timing (OK - not logged)
     // Next paddle impact time
     const tHit = fromFixed(iAdd(fState.t0, timeToPaddleFixed(fState)))
     // If we are past the event time (or very near), perform the step and continue.
-    if (now >= tHit - 1e-4) {
-      step() // ← Deterministic update (fixed-point math)
+    if (now >= tHit - 1e-4 && !stepping) {
+      stepping = true
+      await step() // ← Deterministic update (fixed-point math) + signing
+      stepping = false
     }
     // Draw current frame at time now
     draw(now) // ← Non-deterministic rendering (OK - not logged)
