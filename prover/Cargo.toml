@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["host", "methods", "core", "api-server"]
+
+# Always optimize; building and running the guest takes much longer without optimization.
+[profile.dev]
+opt-level = 3
+panic = "abort"
+
+# Optimized for RISC Zero zkVM proof generation performance
+[profile.release]
+opt-level = 3
+panic = "abort"
+overflow-checks = true
+debug-assertions = false
+codegen-units = 1
+strip = "symbols"
+lto = 'thin'
+debug = 0
