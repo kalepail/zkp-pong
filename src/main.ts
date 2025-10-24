@@ -21,6 +21,10 @@ app.innerHTML = `
     <div style="flex:1;">
       <h3>Match Log</h3>
       <textarea id="log" style="width:100%; min-width:200px; height:420px; white-space:nowrap;"></textarea>
+      <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+        <button id="zkp-verify" disabled>ZKP Verify</button>
+        <span id="zkp-status" style="color:#888; font-size:12px;">Checking server...</span>
+      </div>
     </div>
   </div>
 `
@@ -33,14 +37,49 @@ const downloadBtn = document.getElementById('download') as HTMLButtonElement
 const uploadInput = document.getElementById('upload') as HTMLInputElement
 const scoreSpan = document.getElementById('score') as HTMLSpanElement
 const logArea = document.getElementById('log') as HTMLTextAreaElement
+const zkpVerifyBtn = document.getElementById('zkp-verify') as HTMLButtonElement
+const zkpStatusSpan = document.getElementById('zkp-status') as HTMLSpanElement
 
 let currentCancel: (() => void) | null = null
 let currentLog: any = null
+let serverHealthy = false
+
+// Get API URL from environment variable
+const API_URL = import.meta.env.VITE_RISC0_API_URL
+
+// Check server health on page load
+async function checkServerHealth() {
+  try {
+    const response = await fetch(`${API_URL}/health`)
+    if (response.ok) {
+      const data = await response.json()
+      if (data.status === 'healthy') {
+        serverHealthy = true
+        zkpStatusSpan.textContent = 'Server ready'
+        zkpStatusSpan.style.color = '#0a0'
+        updateZkpButtonState()
+        return
+      }
+    }
+  } catch (e) {
+    // Fall through to error state
+  }
+  zkpStatusSpan.textContent = 'Server unavailable'
+  zkpStatusSpan.style.color = '#a00'
+}
+
+// Update ZKP button state based on server health and log availability
+function updateZkpButtonState() {
+  zkpVerifyBtn.disabled = !(serverHealthy && currentLog)
+}
+
+// Call health check on load
+checkServerHealth()
 
 // Helper to pretty-print log with proper field order
 function formatLog(log: any): string {
   const ordered = {
-    version: log.v,
+    v: log.v,
     game_id: log.game_id,
     events: log.events
   }
@@ -63,6 +102,7 @@ startBtn.onclick = () => {
   validateBtn.disabled = true
   replayBtn.disabled = true
   downloadBtn.disabled = true
+  updateZkpButtonState()
   scoreSpan.textContent = 'Score: 0 - 0'
 
   onUpdate((state) => {
@@ -73,6 +113,7 @@ startBtn.onclick = () => {
       validateBtn.disabled = false
       replayBtn.disabled = false
       downloadBtn.disabled = false
+      updateZkpButtonState()
       currentCancel = null
     }
   })
@@ -150,6 +191,7 @@ uploadInput.onchange = async () => {
     validateBtn.disabled = false
     replayBtn.disabled = false
     downloadBtn.disabled = false
+    updateZkpButtonState()
     // Optionally show score from the uploaded log
     const res = validateLog(parsed)
     scoreSpan.textContent = `Score: ${res.leftScore} - ${res.rightScore}`
@@ -157,5 +199,67 @@ uploadInput.onchange = async () => {
     alert('Failed to read/parse uploaded log')
   } finally {
     uploadInput.value = ''
+  }
+}
+
+zkpVerifyBtn.onclick = async () => {
+  if (!currentLog) {
+    alert('No log available')
+    return
+  }
+
+  try {
+    zkpVerifyBtn.disabled = true
+    zkpStatusSpan.textContent = 'Generating proof...'
+    zkpStatusSpan.style.color = '#fa0'
+
+    // Call /api/prove with groth16 format
+    const proveResponse = await fetch(`${API_URL}/api/prove`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        log: currentLog,
+        receipt_kind: 'groth16'
+      })
+    })
+
+    const proveData = await proveResponse.json()
+
+    if (!proveData.success || !proveData.proof) {
+      throw new Error(proveData.error || 'Failed to generate proof')
+    }
+
+    zkpStatusSpan.textContent = 'Verifying proof...'
+
+    // Call /api/verify
+    const verifyResponse = await fetch(`${API_URL}/api/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        proof: proveData.proof
+      })
+    })
+
+    const verifyData = await verifyResponse.json()
+
+    if (!verifyData.success || !verifyData.is_valid) {
+      throw new Error(verifyData.error || 'Verification failed')
+    }
+
+    zkpStatusSpan.textContent = 'Server ready'
+    zkpStatusSpan.style.color = '#0a0'
+
+    alert(
+      `ZKP Verification Successful!\n\n` +
+      `Fair: ${verifyData.fair}\n` +
+      `Game ID: ${verifyData.game_id}\n` +
+      `Final Score: ${verifyData.left_score} - ${verifyData.right_score}`
+    )
+  } catch (e) {
+    zkpStatusSpan.textContent = 'Verification error'
+    zkpStatusSpan.style.color = '#a00'
+    alert(`ZKP Verification Failed:\n${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    updateZkpButtonState()
   }
 }
