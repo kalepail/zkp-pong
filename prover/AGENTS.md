@@ -8,10 +8,10 @@ This directory contains the RISC Zero zkVM prover for validating Pong game logs.
 
 ```bash
 # CORRECT - Fast development mode
-env RISC0_DEV_MODE=1 cargo test
-env RISC0_DEV_MODE=1 cargo run -- ../pong-log.json
-env RISC0_DEV_MODE=1 cargo build
-env RISC0_DEV_MODE=1 cargo check
+RISC0_DEV_MODE=1 cargo test
+RISC0_DEV_MODE=1 cargo run -- ../pong-log.json
+RISC0_DEV_MODE=1 cargo build
+RISC0_DEV_MODE=1 cargo check
 
 # INCORRECT - Will take 10-30+ minutes per test
 cargo test
@@ -169,18 +169,18 @@ pub fn i_div(a: I, b: I) -> I {
 
 ### Run All Tests
 ```bash
-env RISC0_DEV_MODE=1 cargo test
+RISC0_DEV_MODE=1 cargo test
 ```
 
 ### Run Specific Test Suite
 ```bash
-env RISC0_DEV_MODE=1 cargo test --test integration_test
-env RISC0_DEV_MODE=1 cargo test --test log_validation_test
+RISC0_DEV_MODE=1 cargo test --test integration_test
+RISC0_DEV_MODE=1 cargo test --test log_validation_test
 ```
 
 ### Run Single Test
 ```bash
-env RISC0_DEV_MODE=1 cargo test test_valid_game_19_events
+RISC0_DEV_MODE=1 cargo test test_valid_game_19_events
 ```
 
 ### Test Categories
@@ -202,7 +202,7 @@ env RISC0_DEV_MODE=1 cargo test test_valid_game_19_events
 
 ```bash
 # Validate a game log
-env RISC0_DEV_MODE=1 cargo run -- ../pong-log_events19_1761147203682.json
+RISC0_DEV_MODE=1 cargo run -- ../pong-log_events19_1761147203682.json
 
 # Output includes:
 # - Validation result (fair/unfair)
@@ -237,7 +237,7 @@ env RISC0_DEV_MODE=1 cargo run -- ../pong-log_events19_1761147203682.json
 ## Development Workflow
 
 1. **Make changes to guest code** (`methods/guest/src/*.rs`)
-2. **Run tests**: `env RISC0_DEV_MODE=1 cargo test`
+2. **Run tests**: `RISC0_DEV_MODE=1 cargo test`
 3. **If constants changed**: Update frontend to match
 4. **Verify both sides**: Run frontend tests too (`cd .. && pnpm test`)
 5. **Test with real logs**: Place log JSON in root and run prover
@@ -274,12 +274,12 @@ The commitment hash includes a "PONGLOGv1" prefix for domain separation.
 
 ### Enable verbose output:
 ```bash
-env RISC0_DEV_MODE=1 RUST_LOG=info cargo test -- --nocapture
+RISC0_DEV_MODE=1 RUST_LOG=info cargo test -- --nocapture
 ```
 
 ### Check zkVM execution:
 ```bash
-env RISC0_DEV_MODE=1 RISC0_INFO=1 cargo run -- ../test.json
+RISC0_DEV_MODE=1 RISC0_INFO=1 cargo run -- ../test.json
 ```
 
 ### Verify constant synchronization:

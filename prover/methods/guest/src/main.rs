@@ -79,6 +79,18 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
         return ValidateLogOutput::invalid("Commitment count must match event count");
     }
 
+    // SECURITY: Ensure players use unique seeds to maintain commitment hiding property
+    if inp.player_left_seed == inp.player_right_seed {
+        return ValidateLogOutput::invalid("Players must use unique commitment seeds");
+    }
+
+    // SECURITY: Validate seed entropy - reject obviously weak seeds (e.g., all zeros)
+    let left_zero_count = inp.player_left_seed.iter().filter(|&&b| b == 0).count();
+    let right_zero_count = inp.player_right_seed.iter().filter(|&&b| b == 0).count();
+    if left_zero_count > 28 || right_zero_count > 28 {
+        return ValidateLogOutput::invalid("Commitment seed has insufficient entropy");
+    }
+
     // Verify all commitments before processing game logic
     // This uses SHA-256 hardware accelerator for ~68 cycles per commitment
     for (idx, &paddle_y) in events.iter().enumerate() {
@@ -93,8 +105,19 @@ fn validate_log(inp: ValidateLogInput) -> ValidateLogOutput {
         // Compute expected commitment: SHA256(seed || event_index || paddle_y)
         let expected = core::compute_commitment(seed, idx as u32, paddle_y);
 
-        // Verify commitment matches
-        if expected != inp.commitments[idx].0 {
+        // SECURITY: Safe indexing with defense-in-depth bounds checking
+        let commitment = match inp.commitments.get(idx) {
+            Some(c) => c,
+            None => return ValidateLogOutput::invalid("Commitment index out of bounds"),
+        };
+
+        // SECURITY: Constant-time comparison to prevent timing attacks
+        // Use bitwise operations instead of early-return comparison
+        let mut diff = 0u8;
+        for i in 0..32 {
+            diff |= expected[i] ^ commitment.0[i];
+        }
+        if diff != 0 {
             return ValidateLogOutput::invalid("Commitment verification failed");
         }
     }

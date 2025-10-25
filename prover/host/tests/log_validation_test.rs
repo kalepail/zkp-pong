@@ -1,10 +1,8 @@
 // Tests for validating real game logs from JSON files
-// These tests depend on specific JSON log files in the project root
-use core::{CompactLog, ValidateLogInput, ValidateLogOutput};
-use methods::{GUEST_CODE_FOR_ZK_PROOF_ELF, GUEST_CODE_FOR_ZK_PROOF_ID};
-use risc0_zkvm::{default_prover, ExecutorEnv};
+// All game logs must include commitment data (player seeds and commitments)
+use core::{CompactLog, ValidateLogOutput};
 
-fn load_and_parse_log(path: &str) -> (Vec<i64>, u32) {
+fn load_and_prove_log(path: &str) -> ValidateLogOutput {
     let raw = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("Failed to read {}: {}", path, e));
 
@@ -13,104 +11,28 @@ fn load_and_parse_log(path: &str) -> (Vec<i64>, u32) {
 
     assert_eq!(log.v, 1, "Unsupported log version: {}", log.v);
 
-    let events: Vec<i64> = log
-        .events
-        .iter()
-        .map(|s| {
-            s.parse::<i64>()
-                .unwrap_or_else(|e| panic!("Failed to parse event '{}': {}", s, e))
-        })
-        .collect();
+    // Parse log and create proof using host library
+    let proof = host::generate_pong_proof(&log, host::ReceiptKind::Succinct)
+        .unwrap_or_else(|e| panic!("Failed to generate proof: {}", e));
 
-    (events, log.game_id)
+    // Verify the proof
+    host::verify_pong_proof(&proof)
+        .unwrap_or_else(|e| panic!("Failed to verify proof: {}", e));
+
+    // Decode and return output
+    proof.receipt.journal.decode().expect("Failed to decode journal output")
 }
 
 #[test]
-fn test_valid_game_19_events() {
-    let (events, game_id) = load_and_parse_log("../../pong-log_events19_1761147203682.json");
-
-    let input = ValidateLogInput { events, game_id };
-
-    let env = ExecutorEnv::builder()
-        .write(&input)
-        .unwrap()
-        .build()
-        .unwrap();
-
-    let prover = default_prover();
-    let prove_info = prover
-        .prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF)
-        .expect("Failed to generate proof");
-
-    let receipt = prove_info.receipt;
-
-    receipt
-        .verify(GUEST_CODE_FOR_ZK_PROOF_ID)
-        .expect("Receipt verification failed");
-
-    let output: ValidateLogOutput = receipt.journal.decode().expect("Failed to decode journal");
+fn test_valid_game_85_events() {
+    let output = load_and_prove_log("../../pong-log_events85_1761349770536.json");
 
     assert!(output.fair, "Game should be fair");
     assert!(output.reason.is_none(), "Should not have error reason");
-    assert_eq!(output.events_len, 38, "Expected 38 events (19 pairs)");
-}
+    assert_eq!(output.events_len, 170, "Expected 170 events (85 pairs)");
+    assert_eq!(output.game_id, 1373791838, "Game ID should match");
 
-#[test]
-fn test_valid_game_64_events() {
-    let (events, game_id) = load_and_parse_log("../../pong-log_events64_1761147732142.json");
-
-    let input = ValidateLogInput { events, game_id };
-
-    let env = ExecutorEnv::builder()
-        .write(&input)
-        .unwrap()
-        .build()
-        .unwrap();
-
-    let prover = default_prover();
-    let prove_info = prover
-        .prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF)
-        .expect("Failed to generate proof");
-
-    let receipt = prove_info.receipt;
-
-    receipt
-        .verify(GUEST_CODE_FOR_ZK_PROOF_ID)
-        .expect("Receipt verification failed");
-
-    let output: ValidateLogOutput = receipt.journal.decode().expect("Failed to decode journal");
-
-    assert!(output.fair, "Game should be fair");
-    assert!(output.reason.is_none(), "Should not have error reason");
-    assert_eq!(output.events_len, 128, "Expected 128 events (64 pairs)");
-}
-
-#[test]
-fn test_valid_game_71_events() {
-    let (events, game_id) = load_and_parse_log("../../pong-log_events71_1761147635847.json");
-
-    let input = ValidateLogInput { events, game_id };
-
-    let env = ExecutorEnv::builder()
-        .write(&input)
-        .unwrap()
-        .build()
-        .unwrap();
-
-    let prover = default_prover();
-    let prove_info = prover
-        .prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF)
-        .expect("Failed to generate proof");
-
-    let receipt = prove_info.receipt;
-
-    receipt
-        .verify(GUEST_CODE_FOR_ZK_PROOF_ID)
-        .expect("Receipt verification failed");
-
-    let output: ValidateLogOutput = receipt.journal.decode().expect("Failed to decode journal");
-
-    assert!(output.fair, "Game should be fair");
-    assert!(output.reason.is_none(), "Should not have error reason");
-    assert_eq!(output.events_len, 142, "Expected 142 events (71 pairs)");
+    // Verify final score (from the log we know it's 3-2)
+    assert_eq!(output.left_score, 3, "Left score should be 3");
+    assert_eq!(output.right_score, 2, "Right score should be 2");
 }

@@ -6,8 +6,8 @@ When running any `cargo test` or `cargo run` commands in the prover directory, *
 
 ```bash
 # Correct
-env RISC0_DEV_MODE=1 cargo test
-env RISC0_DEV_MODE=1 cargo run
+RISC0_DEV_MODE=1 cargo test
+RISC0_DEV_MODE=1 cargo run
 
 # Incorrect (will be extremely slow)
 cargo test
@@ -23,16 +23,16 @@ cargo run
 
 ```bash
 # Run all tests
-env RISC0_DEV_MODE=1 cargo test
+RISC0_DEV_MODE=1 cargo test
 
 # Run specific test
-env RISC0_DEV_MODE=1 cargo test test_valid_game
+RISC0_DEV_MODE=1 cargo test test_valid_game
 
 # Build and run the prover
-env RISC0_DEV_MODE=1 cargo run -- input.json
+RISC0_DEV_MODE=1 cargo run -- input.json
 
 # Check compilation
-env RISC0_DEV_MODE=1 cargo check
+RISC0_DEV_MODE=1 cargo check
 ```
 
 **Note:** Development mode proofs are **NOT** secure and should **NEVER** be used in production. They are only for testing and development purposes.
@@ -95,7 +95,7 @@ Any changes to frontend constants require matching updates in prover.
 
 Run tests with:
 ```bash
-env RISC0_DEV_MODE=1 cargo test
+RISC0_DEV_MODE=1 cargo test
 ```
 
 Tests validate:

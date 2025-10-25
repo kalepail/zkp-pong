@@ -6,6 +6,7 @@ import {
   generateCommitmentSeed,
   computeCommitment,
   bytesToHex,
+  hexToBytes,
 } from './commitment'
 import {
   toFixed,
@@ -50,12 +51,12 @@ export interface CompactLog {
   events: NumberLike[]
   // Unique game identifier (u32 integer) - used for serve angle entropy and replay protection
   game_id: number
-  // SHA-256 commitments for each event (hex-encoded, 32 bytes each) - optional for legacy tests
-  commitments?: string[]
-  // Revealed seed for left player (hex-encoded, 32 bytes) - optional for legacy tests
-  player_left_seed?: string
-  // Revealed seed for right player (hex-encoded, 32 bytes) - optional for legacy tests
-  player_right_seed?: string
+  // SHA-256 commitments for each event (hex-encoded, 32 bytes each)
+  commitments: string[]
+  // Revealed seed for left player (hex-encoded, 32 bytes)
+  player_left_seed: string
+  // Revealed seed for right player (hex-encoded, 32 bytes)
+  player_right_seed: string
 }
 
 export interface ValidateResult {
@@ -343,7 +344,7 @@ export async function runGame(canvas: HTMLCanvasElement) {
       leftYAtHitI.toString()
     )
     log.events.push(leftYAtHitI.toString())
-    log.commitments!.push(leftCommitment)
+    log.commitments.push(leftCommitment)
 
     // Right player commits their position (odd index)
     const rightEventIndex = log.events.length
@@ -353,7 +354,7 @@ export async function runGame(canvas: HTMLCanvasElement) {
       rightYAtHitI.toString()
     )
     log.events.push(rightYAtHitI.toString())
-    log.commitments!.push(rightCommitment)
+    log.commitments.push(rightCommitment)
 
     console.log('GAME event ' + JSON.stringify({
       idx: Math.floor(log.events.length / 2) - 1,
@@ -814,11 +815,62 @@ export function replayLog(canvas: HTMLCanvasElement, log: CompactLog) {
 
 // ================= Validation =================
 
-export function validateLog(log: CompactLog): ValidateResult {
+export async function validateLog(log: CompactLog): Promise<ValidateResult> {
   try {
     if (!log || log.v !== 1) return { fair: false, reason: 'Invalid log format', leftScore: 0, rightScore: 0 }
     if (typeof log.game_id !== 'number' || log.game_id < 0 || log.game_id > 0xFFFFFFFF) {
       return { fair: false, reason: 'Invalid game_id format (must be u32)', leftScore: 0, rightScore: 0 }
+    }
+
+    // Validate commitment data exists
+    if (!log.commitments || !log.player_left_seed || !log.player_right_seed) {
+      return { fair: false, reason: 'Missing commitment data (commitments, player_left_seed, or player_right_seed)', leftScore: 0, rightScore: 0 }
+    }
+
+    // Validate commitment count matches event count
+    const eventsLen = Array.isArray(log.events) ? log.events.length : 0
+    if (log.commitments.length !== eventsLen) {
+      return { fair: false, reason: 'Commitment count must match event count', leftScore: 0, rightScore: 0 }
+    }
+
+    // Parse seeds from hex
+    const playerLeftSeed = hexToBytes(log.player_left_seed)
+    const playerRightSeed = hexToBytes(log.player_right_seed)
+
+    // Validate seed length (must be 32 bytes)
+    if (playerLeftSeed.length !== 32 || playerRightSeed.length !== 32) {
+      return { fair: false, reason: 'Invalid seed length (must be 32 bytes)', leftScore: 0, rightScore: 0 }
+    }
+
+    // SECURITY: Ensure players use unique seeds to maintain commitment hiding property
+    const seedsEqual = playerLeftSeed.every((byte, i) => byte === playerRightSeed[i])
+    if (seedsEqual) {
+      return { fair: false, reason: 'Players must use unique commitment seeds', leftScore: 0, rightScore: 0 }
+    }
+
+    // SECURITY: Validate seed entropy - reject obviously weak seeds (e.g., all zeros)
+    const leftZeroCount = playerLeftSeed.filter(b => b === 0).length
+    const rightZeroCount = playerRightSeed.filter(b => b === 0).length
+    if (leftZeroCount > 28 || rightZeroCount > 28) {
+      return { fair: false, reason: 'Commitment seed has insufficient entropy', leftScore: 0, rightScore: 0 }
+    }
+
+    // Verify all commitments before processing game logic
+    for (let idx = 0; idx < log.events.length; idx++) {
+      const paddleY = log.events[idx]
+      const paddleYStr = typeof paddleY === 'string' ? paddleY : toFixed(paddleY).toString()
+
+      // Determine which player's seed to use (even = left, odd = right)
+      const isLeft = idx % 2 === 0
+      const seed = isLeft ? playerLeftSeed : playerRightSeed
+
+      // Compute expected commitment: SHA256(seed || event_index || paddle_y)
+      const expectedCommitment = await computeCommitment(seed, idx, paddleYStr)
+
+      // Verify commitment matches
+      if (log.commitments[idx] !== expectedCommitment) {
+        return { fair: false, reason: `Commitment verification failed at index ${idx}`, leftScore: 0, rightScore: 0 }
+      }
     }
 
     const gameId = log.game_id
@@ -881,8 +933,7 @@ export function validateLog(log: CompactLog): ValidateResult {
     let eventIdx = 0
     let processedEvents = 0 // Track total events processed to match log.events.length
 
-    // Empty games are invalid - no gameplay occurred
-    const eventsLen = Array.isArray(log.events) ? log.events.length : 0
+    // Empty games are invalid - no gameplay occurred (already validated eventsLen above)
     if (eventsLen === 0) {
       return { fair: false, reason: 'No events provided - game never started', leftScore: 0, rightScore: 0 }
     }

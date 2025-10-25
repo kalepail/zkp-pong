@@ -73,8 +73,8 @@ Guidelines within scope of the repo:
   - Frontend should validate event count before export to prevent prover rejection
   - Core library (`prover/core/`) is no_std compatible for zkVM execution
   - **CRITICAL**: ALWAYS use `RISC0_DEV_MODE=1` when running cargo commands in prover:
-    - `env RISC0_DEV_MODE=1 cargo test` - Run tests (completes in seconds vs 10-30 minutes)
-    - `env RISC0_DEV_MODE=1 cargo run` - Run prover binary
+    - `RISC0_DEV_MODE=1 cargo test` - Run tests (completes in seconds vs 10-30 minutes)
+    - `RISC0_DEV_MODE=1 cargo run` - Run prover binary
     - Without this flag, proof generation is extremely slow and impractical for development
     - Dev mode proofs are NOT secure - only for testing/development
 

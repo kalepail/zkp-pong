@@ -25,15 +25,29 @@ impl Commitment32 {
 #[derive(Serialize, Deserialize)]
 pub struct ValidateLogInput {
     pub events: Vec<I>,
-    /// Unique game identifier - used for serve angle entropy
-    /// Generated randomly by client at game start
+    /// Unique game identifier - used for serve angle entropy and replay protection
+    ///
+    /// SECURITY REQUIREMENT: This MUST be generated using a cryptographically secure
+    /// random number generator (CSRNG) on the client side. Using predictable or
+    /// sequential game IDs could enable replay attacks or game outcome prediction.
+    ///
+    /// Recommended generation (JavaScript):
+    /// ```js
+    /// const gameId = crypto.getRandomValues(new Uint32Array(1))[0];
+    /// ```
     pub game_id: u32,
     /// SHA-256 commitments for each event (one per paddle position)
     /// Each commitment: SHA256(seed || event_index || paddle_y)
     pub commitments: Vec<Commitment32>,
     /// Revealed seed for left player (32 bytes)
+    ///
+    /// SECURITY REQUIREMENT: Must be generated using crypto.getRandomValues()
+    /// or equivalent CSRNG with full 32 bytes of entropy
     pub player_left_seed: [u8; 32],
     /// Revealed seed for right player (32 bytes)
+    ///
+    /// SECURITY REQUIREMENT: Must be generated using crypto.getRandomValues()
+    /// or equivalent CSRNG with full 32 bytes of entropy
     pub player_right_seed: [u8; 32],
 }
 

@@ -94,8 +94,8 @@ Tests cover:
 When working on prover code, always use `RISC0_DEV_MODE=1`:
 ```bash
 cd prover
-env RISC0_DEV_MODE=1 cargo test
-env RISC0_DEV_MODE=1 cargo run -- ../pong-log.json
+RISC0_DEV_MODE=1 cargo test
+RISC0_DEV_MODE=1 cargo run -- ../pong-log.json
 ```
 
 See `prover/.claude/instructions.md` for detailed prover-specific guidelines.
@@ -114,7 +114,7 @@ See `prover/.claude/instructions.md` for detailed prover-specific guidelines.
 1. Make changes to TypeScript or Rust
 2. If constants changed, update both `src/pong/constants.ts` and `prover/methods/guest/src/constants.rs`
 3. Run TypeScript tests: `pnpm test`
-4. Run prover tests: `cd prover && env RISC0_DEV_MODE=1 cargo test`
+4. Run prover tests: `cd prover && RISC0_DEV_MODE=1 cargo test`
 5. Verify both pass before committing
 
 ### Generating Test Logs
