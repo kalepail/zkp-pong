@@ -122,10 +122,10 @@ startBtn.onclick = async () => {
   })
 }
 
-validateBtn.onclick = () => {
+validateBtn.onclick = async () => {
   try {
     const parsed = JSON.parse(logArea.value)
-    const result = validateLog(parsed)
+    const result = await validateLog(parsed)
     alert(`Fair: ${result.fair}\nReason: ${result.reason ?? '(none)'}\nFinal Score: ${result.leftScore} - ${result.rightScore}`)
   } catch (e) {
     alert('Invalid log JSON')
@@ -196,7 +196,7 @@ uploadInput.onchange = async () => {
     downloadBtn.disabled = false
     updateZkpButtonState()
     // Optionally show score from the uploaded log
-    const res = validateLog(parsed)
+    const res = await validateLog(parsed)
     scoreSpan.textContent = `Score: ${res.leftScore} - ${res.rightScore}`
   } catch (e) {
     alert('Failed to read/parse uploaded log')
