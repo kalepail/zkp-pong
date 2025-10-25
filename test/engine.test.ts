@@ -383,4 +383,42 @@ describe('RISC0 zkVM Compatibility', () => {
       expect(result.reason).toMatch(/Invalid final score|neither player reached|Paddle/)
     })
   })
+
+  describe('Negative Paddle Positions (MEDIUM PRIORITY)', () => {
+    const testGameId = 0 // Zero game_id for tests
+
+    it('should reject negative paddle Y values', async () => {
+      const logWithoutCommitments = {
+        v: 1 as const,
+        events: [
+          '-1000',     // leftY - negative (invalid)
+          '15728640',  // rightY - center (valid)
+        ],
+        game_id: testGameId,
+      }
+      const log = await addCommitmentsToLog(logWithoutCommitments)
+
+      const result = await validateLog(log)
+
+      expect(result.fair).toBe(false)
+      // Should be caught as "out of bounds" or "too fast"
+      expect(result.reason).toMatch(/out of bounds|too fast/)
+    })
+
+    it('should handle zero paddle position', async () => {
+      const logWithoutCommitments = {
+        v: 1 as const,
+        events: [
+          '0',         // leftY - at boundary
+          '15728640',  // rightY - center
+        ],
+        game_id: testGameId,
+      }
+      const log = await addCommitmentsToLog(logWithoutCommitments)
+
+      const result = await validateLog(log)
+      // May be invalid for physics reasons, but should not crash
+      expect(result).toBeDefined()
+    })
+  })
 })
