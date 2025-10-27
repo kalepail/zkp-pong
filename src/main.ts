@@ -1,7 +1,7 @@
 import './style.css'
 import { runGame, validateLog, replayLog } from './pong/engine'
 import { runP2PGame } from './pong/engine-p2p'
-import { createP2PClient, sendPlayerReady, sendPlayerLog, type P2PGameClient } from './pong/p2p'
+import { createP2PClient, sendPlayerReady, sendPlayerLog, closeConnection, type P2PGameClient } from './pong/p2p'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
@@ -38,7 +38,7 @@ app.innerHTML = `
     </div>
     <div style="flex:1;">
       <h3>Match Log</h3>
-      <textarea id="log" style="width:100%; min-width:200px; height:420px; white-space:nowrap;"></textarea>
+      <textarea id="log" style="width:100%; min-width:200px; height:420px; white-space:pre; overflow-x:auto;"></textarea>
       <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
         <button id="zkp-verify" disabled>ZKP Verify</button>
         <span id="zkp-status" style="color:#888; font-size:12px;">Checking server...</span>
@@ -179,6 +179,13 @@ quickMatchBtn.onclick = async () => {
       downloadBtn.disabled = false
       updateZkpButtonState()
       quickMatchBtn.disabled = false
+
+      // Update status to show success
+      p2pStatusSpan.textContent = 'Game complete! Ready for new match'
+      p2pStatusSpan.style.color = '#0a0'
+
+      // Close websocket connection - new game will create new connection
+      closeConnection(p2pClient)
     }
 
     p2pClient.onOpponentDisconnected = () => {

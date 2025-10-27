@@ -294,17 +294,13 @@ export async function runP2PGame(
     const yAtHitI = ballYatFixed(fState, tHitI)
     const yAtHit = fromFixed(yAtHitI)
 
-    // Determine paddle positions at event time (local predictions)
+    // Determine paddle positions at event time (local predictions using deterministic AI)
     const movingLeft = fState.dir < 0
     const leftYAtHitI = paddleYAtFixed(leftM, tHitI)
     const rightYAtHitI = paddleYAtFixed(rightM, tHitI)
 
-    // Compute commitment for MY paddle only (using local prediction)
+    // Compute commitment for MY paddle only
     const myPaddleY = role === 'left' ? leftYAtHitI : rightYAtHitI
-
-    // Use global interleaved event index for commitment
-    // Left player: indices 0, 2, 4, 6...
-    // Right player: indices 1, 3, 5, 7...
     const myEventIndex = role === 'left' ? fullEvents.length : fullEvents.length + 1
 
     const myCommitmentStr = await computeCommitment(
@@ -315,10 +311,10 @@ export async function runP2PGame(
     myEvents.push(myPaddleY.toString())
     myCommitments.push(myCommitmentStr)
 
-    // Send my paddle position to opponent
+    // Send my paddle position to opponent (non-blocking)
     sendPaddlePosition(
       p2pClient,
-      fullEvents.length / 2, // Event pair index
+      fullEvents.length / 2,
       myPaddleY.toString(),
       myCommitmentStr
     )
@@ -329,29 +325,13 @@ export async function runP2PGame(
       paddleY: myPaddleY.toString(),
     })
 
-    // Wait for opponent's paddle position
-    let opponentPaddleY: string
-    try {
-      opponentPaddleY = await waitForOpponentPaddle(p2pClient, fullEvents.length / 2, 15000)
-      console.log('[P2P] Received opponent paddle:', {
-        eventIndex: fullEvents.length / 2,
-        paddleY: opponentPaddleY,
-      })
-    } catch (err) {
-      console.warn('[P2P] Timeout waiting for opponent paddle - opponent may have finished game:', err)
-      // Opponent likely finished the game, end gracefully
-      state.ended = true
-      notify()
+    // OPTIMISTIC PREDICTION: Use locally computed opponent paddle position
+    // Both clients run identical deterministic AI, so predictions should match
+    const predictedOpponentPaddleY = role === 'left' ? rightYAtHitI : leftYAtHitI
 
-      // Send our partial log anyway so server can merge
-      const partialLog = getLog()
-      sendPlayerLog(p2pClient, partialLog)
-      return
-    }
-
-    // Get exchanged paddle positions as Q16.16 fixed-point values
-    const finalLeftYI = role === 'left' ? myPaddleY : (BigInt(opponentPaddleY) as I)
-    const finalRightYI = role === 'right' ? myPaddleY : (BigInt(opponentPaddleY) as I)
+    // Use predicted paddle positions for immediate processing
+    const finalLeftYI = role === 'left' ? myPaddleY : predictedOpponentPaddleY
+    const finalRightYI = role === 'right' ? myPaddleY : predictedOpponentPaddleY
 
     // Log both paddle positions in correct order (left, right)
     fullEvents.push(finalLeftYI.toString())
@@ -361,13 +341,13 @@ export async function runP2PGame(
     const finalLeftYNum = fromFixed(finalLeftYI)
     const finalRightYNum = fromFixed(finalRightYI)
 
-    // Use the EXCHANGED positions for hit detection
+    // Use the predicted positions for hit detection
     const half = PADDLE_HEIGHT / 2
     const finalHit = movingLeft
       ? Math.abs(finalLeftYNum - yAtHit) <= half + BALL_RADIUS
       : Math.abs(finalRightYNum - yAtHit) <= half + BALL_RADIUS
 
-    console.log('[P2P] Event recorded:', {
+    console.log('[P2P] Event processed (predicted):', {
       idx: Math.floor(fullEvents.length / 2) - 1,
       dir: fState.dir,
       leftY: finalLeftYI.toString(),
@@ -385,7 +365,7 @@ export async function runP2PGame(
     state.t0 = fromFixed(fState.t0)
 
     if (finalHit) {
-      // Bounce - use the exchanged paddle positions (already in fixed-point)
+      // Bounce - use the predicted paddle positions
       const paddleYI = movingLeft ? finalLeftYI : finalRightYI
       const { vx, vy, speed, dir } = bounceFixed(fState, paddleYI)
       fState.vx = vx
@@ -397,13 +377,13 @@ export async function runP2PGame(
       state.speed = fromFixed(fState.speed)
       state.dir = fState.dir
 
-      // Update paddle positions - use exchanged values for consistency
+      // Update paddle positions
       fState.leftY = finalLeftYI
       fState.rightY = finalRightYI
       state.leftY = finalLeftYNum
       state.rightY = finalRightYNum
 
-      // Update paddle motion timelines to match exchanged positions
+      // Update paddle motion timelines
       leftM.y0 = finalLeftYI
       leftM.t0 = tHitI
       leftM.target = finalLeftYI
@@ -411,7 +391,7 @@ export async function runP2PGame(
       rightM.t0 = tHitI
       rightM.target = finalRightYI
 
-      // Plan next targets (fullEvents now has the current event, so next is at fullEvents.length)
+      // Plan next targets
       planTargetsForNextEventFix(fState, fullEvents.length)
     } else {
       // Miss: score for the opponent
@@ -424,7 +404,7 @@ export async function runP2PGame(
         rally: rallyId,
       })
 
-      // Check if game ended BEFORE starting a new serve
+      // Check if game ended
       if (state.leftScore >= POINTS_TO_WIN || state.rightScore >= POINTS_TO_WIN) {
         console.log('[P2P] Game ended! Final score:', {
           leftScore: state.leftScore,
@@ -436,7 +416,7 @@ export async function runP2PGame(
         return
       }
 
-      // Game continues - start new serve toward the scorer
+      // Game continues - start new serve
       const receiverDir: -1 | 1 = movingLeft ? 1 : -1
       fState = serveFixed(receiverDir, state.t0, fullEvents.length)
       fState.leftY = finalLeftYI
@@ -457,7 +437,7 @@ export async function runP2PGame(
       }
       rallyId++
 
-      // Update paddle motion timelines to match exchanged positions
+      // Update paddle motion timelines
       leftM.y0 = finalLeftYI
       leftM.t0 = fState.t0
       leftM.target = finalLeftYI
@@ -465,26 +445,51 @@ export async function runP2PGame(
       rightM.t0 = fState.t0
       rightM.target = finalRightYI
 
-      // Plan targets for next serve (fullEvents now has the current event)
+      // Plan targets for next serve
       planTargetsForNextEventFix(fState, fullEvents.length)
     }
+
+    // Background verification: wait for opponent paddle and verify it matches prediction
+    const eventIndex = (fullEvents.length / 2) - 1
+    waitForOpponentPaddle(p2pClient, eventIndex, 15000)
+      .then((opponentPaddleY) => {
+        const predictedStr = predictedOpponentPaddleY.toString()
+        if (opponentPaddleY !== predictedStr) {
+          console.warn('[P2P] DESYNC WARNING: Opponent paddle mismatch!', {
+            eventIndex,
+            predicted: predictedStr,
+            received: opponentPaddleY,
+          })
+        } else {
+          console.log('[P2P] Opponent paddle verified:', { eventIndex })
+        }
+      })
+      .catch((err) => {
+        console.warn('[P2P] Timeout verifying opponent paddle:', err)
+        // Don't end game here - opponent may have finished
+      })
 
     notify()
   }
 
   // Animation loop
   let rafId = 0
-  let stepping = false
+  let eventInProgress = false
 
   async function render() {
     if (state.ended) return
     const now = performance.now() / 1000
     const tHit = fromFixed(iAdd(fState.t0, timeToPaddleFixed(fState)))
 
-    if (now >= tHit - 1e-4 && !stepping) {
-      stepping = true
-      await step()
-      stepping = false
+    if (now >= tHit - 1e-4 && !eventInProgress) {
+      eventInProgress = true
+      // Fire step() asynchronously without blocking render loop
+      step().then(() => {
+        eventInProgress = false
+      }).catch((err) => {
+        console.error('[P2P] Error in step():', err)
+        eventInProgress = false
+      })
     }
 
     draw(now)
