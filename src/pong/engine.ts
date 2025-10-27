@@ -176,16 +176,25 @@ export async function runGame(canvas: HTMLCanvasElement) {
     return clampPaddleY_fixed(iAdd(m.y0, (step * (dir as unknown as bigint)) as unknown as I), halfI, heightI)
   }
 
-  function planTargetsForNextEventFix(fs: FixState) {
+  function planTargetsForNextEventFix(fs: FixState, eventIndex: number) {
     const tChangeI = fs.t0
     const dtToP = timeToPaddleFixed(fs)
     const tHitI = iAdd(fs.t0, dtToP)
     const yInterceptI = reflect1D_fixed(fs.y, fs.vy, iSub(tHitI, fs.t0), yMinI, yMaxI)
     const halfI = iDiv(paddleHeightI, toFixed(2))
-    // AI aims for a random point along the paddle height
-    // Randomness is fine here since paddle positions are logged and validated for reachability
     const paddleHeightPixels = Number(paddleHeightI >> FRAC_BITS)
-    const randomOffset = Math.random() * paddleHeightPixels - (paddleHeightPixels / 2)
+
+    // Use deterministic seeded RNG with better entropy mixing
+    // Simple hash function to mix event index and game_id thoroughly
+    let hash = ((eventIndex * 1664525 + gameId * 1013904223) | 0) >>> 0
+    hash = hash ^ (hash >>> 16)
+    hash = (hash * 0x85ebca6b) | 0
+    hash = hash ^ (hash >>> 13)
+
+    const offsetRange = paddleHeightPixels // 80 pixels
+    const offsetRaw = ((hash >>> 0) % offsetRange) | 0
+    const randomOffset = offsetRaw - (paddleHeightPixels / 2) // Convert to range [-40, +40]
+
     const aimOffsetI = toFixedInt(Math.floor(randomOffset))
     const desiredI = clampPaddleY_fixed(iAdd(yInterceptI, aimOffsetI), halfI, heightI)
     const movingLeftNext = fs.dir < 0
@@ -280,7 +289,7 @@ export async function runGame(canvas: HTMLCanvasElement) {
   rightM.y0 = fState.rightY
   leftM.target = fState.leftY
   rightM.target = fState.rightY
-  planTargetsForNextEventFix(fState)
+  planTargetsForNextEventFix(fState, 0) // Initial event
 
   const log: CompactLog = {
     v: 1,
@@ -401,7 +410,7 @@ export async function runGame(canvas: HTMLCanvasElement) {
       state.leftY = leftYAtHit
       state.rightY = rightYAtHit
       // Plan next targets: hitter re-centers, opponent aims for intercept
-      planTargetsForNextEventFix(fState)
+      planTargetsForNextEventFix(fState, log.events.length)
     } else {
       // Miss: score for the opponent
       if (movingLeft) state.rightScore++
@@ -444,7 +453,7 @@ export async function runGame(canvas: HTMLCanvasElement) {
         rally: rallyId,
       }))
       // On serve, set receiver target to intercept, other to center
-      planTargetsForNextEventFix(fState)
+      planTargetsForNextEventFix(fState, log.events.length)
     }
 
     notify()

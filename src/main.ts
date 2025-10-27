@@ -1,10 +1,28 @@
 import './style.css'
 import { runGame, validateLog, replayLog } from './pong/engine'
+import { runP2PGame } from './pong/engine-p2p'
+import { createP2PClient, sendPlayerReady, sendPlayerLog, type P2PGameClient } from './pong/p2p'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
   <div style="display:flex; gap:16px; align-items:flex-start;">
     <div>
+      <div style="margin-bottom:8px; padding:8px; border:1px solid #555; background:#222;">
+        <div style="margin-bottom:8px;">
+          <label style="color:#fff; margin-right:16px;">
+            <input type="radio" name="mode" value="single" checked /> Single Player
+          </label>
+          <label style="color:#fff;">
+            <input type="radio" name="mode" value="p2p" /> P2P Multiplayer
+          </label>
+        </div>
+        <div id="p2p-controls" style="display:none;">
+          <div style="display:flex; gap:8px; margin-bottom:8px;">
+            <button id="quick-match" style="flex:1; padding:8px; font-weight:bold;">Find Match</button>
+          </div>
+          <div id="p2p-status" style="color:#888; font-size:12px;">Click "Find Match" to play</div>
+        </div>
+      </div>
       <canvas id="canvas" width="800" height="480" style="border:1px solid #ccc; background:#111"></canvas>
       <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
         <button id="start">Start Match</button>
@@ -40,12 +58,23 @@ const logArea = document.getElementById('log') as HTMLTextAreaElement
 const zkpVerifyBtn = document.getElementById('zkp-verify') as HTMLButtonElement
 const zkpStatusSpan = document.getElementById('zkp-status') as HTMLSpanElement
 
+// P2P controls
+const modeRadios = document.querySelectorAll('input[name="mode"]') as NodeListOf<HTMLInputElement>
+const p2pControlsDiv = document.getElementById('p2p-controls') as HTMLDivElement
+const quickMatchBtn = document.getElementById('quick-match') as HTMLButtonElement
+const p2pStatusSpan = document.getElementById('p2p-status') as HTMLSpanElement
+
 let currentCancel: (() => void) | null = null
 let currentLog: any = null
 let serverHealthy = false
+let gameMode: 'single' | 'p2p' = 'single'
+let p2pClient: P2PGameClient | null = null
+let p2pReady = false
 
 // Get API URL from environment variable
 const API_URL = import.meta.env.VITE_RISC0_API_URL
+// Get WebSocket server URL (default to local dev server)
+const WS_URL = import.meta.env.VITE_WS_SERVER_URL || 'ws://localhost:8787'
 
 // Check server health on page load
 async function checkServerHealth() {
@@ -89,6 +118,91 @@ function formatLog(log: any): string {
   return JSON.stringify(ordered, null, 2)
 }
 
+// Mode switching
+modeRadios.forEach(radio => {
+  radio.onchange = () => {
+    gameMode = (radio as HTMLInputElement).value as 'single' | 'p2p'
+    p2pControlsDiv.style.display = gameMode === 'p2p' ? 'block' : 'none'
+    startBtn.disabled = gameMode === 'p2p' && !p2pReady
+  }
+})
+
+// P2P Quick Match
+quickMatchBtn.onclick = async () => {
+  p2pStatusSpan.textContent = 'Finding match...'
+  p2pStatusSpan.style.color = '#fa0'
+  quickMatchBtn.disabled = true
+
+  try {
+    // Request matchmaking from server
+    const response = await fetch(`${WS_URL}/matchmaking`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    if (!response.ok) {
+      throw new Error(`Matchmaking failed: ${response.statusText}`)
+    }
+
+    const { roomId, gameId } = await response.json()
+
+    p2pStatusSpan.textContent = 'Match found! Connecting...'
+
+    // Connect to assigned room
+    p2pClient = createP2PClient({
+      serverUrl: WS_URL,
+      roomId,
+      playerId: `player-${Date.now()}`,
+      gameId,
+    })
+
+    p2pClient.onGameStart = (_gameId, role, opponentConnected) => {
+      p2pStatusSpan.textContent = `Playing as ${role.toUpperCase()} player${opponentConnected ? ' - Ready!' : ' - Waiting for opponent...'}`
+      p2pStatusSpan.style.color = opponentConnected ? '#0a0' : '#fa0'
+      p2pReady = opponentConnected
+      startBtn.disabled = !p2pReady
+    }
+
+    p2pClient.onOpponentConnected = () => {
+      p2pStatusSpan.textContent = 'Opponent ready! Starting soon...'
+      p2pStatusSpan.style.color = '#0a0'
+      p2pReady = true
+      startBtn.disabled = false
+    }
+
+    p2pClient.onGameEnd = (log) => {
+      console.log('[P2P] Received merged log from server:', log)
+      currentLog = log
+      logArea.value = formatLog(log)
+      validateBtn.disabled = false
+      replayBtn.disabled = false
+      downloadBtn.disabled = false
+      updateZkpButtonState()
+      quickMatchBtn.disabled = false
+    }
+
+    p2pClient.onOpponentDisconnected = () => {
+      p2pStatusSpan.textContent = 'Opponent disconnected'
+      p2pStatusSpan.style.color = '#a00'
+      p2pReady = false
+      startBtn.disabled = true
+      quickMatchBtn.disabled = false
+    }
+
+    p2pClient.onConnectionError = (error) => {
+      p2pStatusSpan.textContent = `Connection error: ${error.message}`
+      p2pStatusSpan.style.color = '#a00'
+      p2pReady = false
+      startBtn.disabled = true
+      quickMatchBtn.disabled = false
+    }
+  } catch (error) {
+    p2pStatusSpan.textContent = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+    p2pStatusSpan.style.color = '#a00'
+    quickMatchBtn.disabled = false
+  }
+}
+
 startBtn.onclick = async () => {
   if (currentCancel) {
     currentCancel()
@@ -99,27 +213,78 @@ startBtn.onclick = async () => {
   logArea.value = ''
   currentLog = null
 
-  const { cancel, onUpdate, getLog } = await runGame(canvas)
+  if (gameMode === 'single') {
+    // Single player mode
+    const { cancel, onUpdate, getLog } = await runGame(canvas)
 
-  currentCancel = cancel
-  validateBtn.disabled = true
-  replayBtn.disabled = true
-  downloadBtn.disabled = true
-  updateZkpButtonState()
-  scoreSpan.textContent = 'Score: 0 - 0'
+    currentCancel = cancel
+    validateBtn.disabled = true
+    replayBtn.disabled = true
+    downloadBtn.disabled = true
+    updateZkpButtonState()
+    scoreSpan.textContent = 'Score: 0 - 0'
 
-  onUpdate((state) => {
-    scoreSpan.textContent = `Score: ${state.leftScore} - ${state.rightScore}`
-    if (state.ended) {
-      currentLog = getLog()
-      logArea.value = formatLog(currentLog)
-      validateBtn.disabled = false
-      replayBtn.disabled = false
-      downloadBtn.disabled = false
-      updateZkpButtonState()
-      currentCancel = null
+    onUpdate((state) => {
+      scoreSpan.textContent = `Score: ${state.leftScore} - ${state.rightScore}`
+      if (state.ended) {
+        currentLog = getLog()
+        logArea.value = formatLog(currentLog)
+        validateBtn.disabled = false
+        replayBtn.disabled = false
+        downloadBtn.disabled = false
+        updateZkpButtonState()
+        currentCancel = null
+      }
+    })
+  } else if (gameMode === 'p2p' && p2pClient && p2pReady) {
+    // P2P multiplayer mode
+    if (!p2pClient.gameId || !p2pClient.role) {
+      alert('Not ready for P2P game')
+      return
     }
-  })
+
+    // Send ready signal
+    sendPlayerReady(p2pClient)
+    p2pStatusSpan.textContent = 'Waiting for opponent to be ready...'
+
+    // Wait for game_ready message
+    const gameReadyPromise = new Promise<void>((resolve) => {
+      p2pClient!.onGameReady = () => {
+        p2pStatusSpan.textContent = 'Game starting!'
+        p2pStatusSpan.style.color = '#0a0'
+        resolve()
+      }
+    })
+
+    await gameReadyPromise
+
+    const { cancel, onUpdate, getLog } = await runP2PGame(
+      canvas,
+      p2pClient,
+      p2pClient.gameId,
+      p2pClient.role
+    )
+
+    currentCancel = cancel
+    validateBtn.disabled = true
+    replayBtn.disabled = true
+    downloadBtn.disabled = true
+    updateZkpButtonState()
+    scoreSpan.textContent = 'Score: 0 - 0'
+
+    onUpdate((state) => {
+      scoreSpan.textContent = `Score: ${state.leftScore} - ${state.rightScore}`
+      if (state.ended) {
+        // Send partial log to server for merging
+        const partialLog = getLog()
+        console.log('[P2P] Game ended locally, sending partial log with', partialLog.events.length, 'events')
+        sendPlayerLog(p2pClient!, partialLog)
+        p2pStatusSpan.textContent = 'Game ended - waiting for merged log...'
+        p2pStatusSpan.style.color = '#fa0'
+        currentCancel = null
+      }
+    })
+  }
 }
 
 validateBtn.onclick = async () => {
