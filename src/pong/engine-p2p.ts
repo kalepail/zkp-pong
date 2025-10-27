@@ -413,6 +413,11 @@ export async function runP2PGame(
         })
         state.ended = true
         notify()
+
+        // Send partial log to server for merging
+        const partialLog = getLog()
+        sendPlayerLog(p2pClient, partialLog)
+
         return
       }
 

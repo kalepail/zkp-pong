@@ -185,7 +185,9 @@ quickMatchBtn.onclick = async () => {
       p2pStatusSpan.style.color = '#0a0'
 
       // Close websocket connection - new game will create new connection
-      closeConnection(p2pClient)
+      if (p2pClient) {
+        closeConnection(p2pClient)
+      }
     }
 
     p2pClient.onOpponentDisconnected = () => {
