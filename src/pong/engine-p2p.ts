@@ -243,8 +243,6 @@ export async function runP2PGame(
     ended: false,
   }
 
-  console.log('[P2P] Starting game as', role, 'player, game_id:', gameId)
-
   // Initialize paddle motion
   leftM.t0 = fState.t0
   rightM.t0 = fState.t0
@@ -319,12 +317,6 @@ export async function runP2PGame(
       myCommitmentStr
     )
 
-    console.log('[P2P] Sent paddle position:', {
-      role,
-      eventIndex: fullEvents.length / 2,
-      paddleY: myPaddleY.toString(),
-    })
-
     // OPTIMISTIC PREDICTION: Use locally computed opponent paddle position
     // Both clients run identical deterministic AI, so predictions should match
     const predictedOpponentPaddleY = role === 'left' ? rightYAtHitI : leftYAtHitI
@@ -346,15 +338,6 @@ export async function runP2PGame(
     const finalHit = movingLeft
       ? Math.abs(finalLeftYNum - yAtHit) <= half + BALL_RADIUS
       : Math.abs(finalRightYNum - yAtHit) <= half + BALL_RADIUS
-
-    console.log('[P2P] Event processed (predicted):', {
-      idx: Math.floor(fullEvents.length / 2) - 1,
-      dir: fState.dir,
-      leftY: finalLeftYI.toString(),
-      rightY: finalRightYI.toString(),
-      hit: finalHit,
-      rally: rallyId,
-    })
 
     // Advance kinematics to tHit
     fState.x = movingLeft ? iAdd(leftFaceI, ballRadiusI) : iSub(rightFaceI, ballRadiusI)
@@ -397,12 +380,6 @@ export async function runP2PGame(
       // Miss: score for the opponent
       if (movingLeft) state.rightScore++
       else state.leftScore++
-
-      console.log('[P2P] Miss by', movingLeft ? 'LEFT' : 'RIGHT', {
-        leftScore: state.leftScore,
-        rightScore: state.rightScore,
-        rally: rallyId,
-      })
 
       // Check if game ended
       if (state.leftScore >= POINTS_TO_WIN || state.rightScore >= POINTS_TO_WIN) {
@@ -465,13 +442,10 @@ export async function runP2PGame(
             predicted: predictedStr,
             received: opponentPaddleY,
           })
-        } else {
-          console.log('[P2P] Opponent paddle verified:', { eventIndex })
         }
       })
-      .catch((err) => {
-        console.warn('[P2P] Timeout verifying opponent paddle:', err)
-        // Don't end game here - opponent may have finished
+      .catch(() => {
+        // Timeout - opponent may have finished game
       })
 
     notify()

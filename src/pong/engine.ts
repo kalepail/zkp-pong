@@ -107,10 +107,6 @@ export async function runGame(canvas: HTMLCanvasElement) {
   // Generate random commitment seeds for both players
   const playerLeftCommitment = generateCommitmentSeed()
   const playerRightCommitment = generateCommitmentSeed()
-  console.log('Generated player commitment seeds:', {
-    leftSeed: bytesToHex(playerLeftCommitment.seed),
-    rightSeed: bytesToHex(playerRightCommitment.seed),
-  })
 
   // Fixed constants
   const widthI = toFixed(WIDTH)
@@ -271,17 +267,6 @@ export async function runGame(canvas: HTMLCanvasElement) {
     rightScore: 0,
     ended: false,
   }
-  // Debug log: use integer fixed-point string values (no floats)
-  console.log('GAME serve ' + JSON.stringify({
-    receiverDir: fState.dir,
-    t0: fState.t0.toString(),
-    vx: fState.vx.toString(),
-    vy: fState.vy.toString(),
-    speed: fState.speed.toString(),
-    leftScore: state.leftScore,
-    rightScore: state.rightScore,
-    rally: rallyId,
-  }))
   // Initialize paddle motion timelines and plan the first intercept.
   leftM.t0 = fState.t0
   rightM.t0 = fState.t0
@@ -365,18 +350,6 @@ export async function runGame(canvas: HTMLCanvasElement) {
     log.events.push(rightYAtHitI.toString())
     log.commitments.push(rightCommitment)
 
-    console.log('GAME event ' + JSON.stringify({
-      idx: Math.floor(log.events.length / 2) - 1,
-      dir: fState.dir,
-      tHit: tHitI.toString(),
-      dt: dtToPaddleI.toString(),
-      yAtHit: yAtHitI.toString(),
-      leftYAtHit: leftYAtHitI.toString(),
-      rightYAtHit: rightYAtHitI.toString(),
-      hit,
-      rally: rallyId,
-    }))
-
     // Advance kinematics to tHit
     fState.x = movingLeft ? iAdd(leftFaceI, ballRadiusI) : iSub(rightFaceI, ballRadiusI)
     fState.y = yAtHitI
@@ -388,7 +361,7 @@ export async function runGame(canvas: HTMLCanvasElement) {
     if (hit) {
       // Bounce
       const paddleYI = toFixed(movingLeft ? leftYAtHit : rightYAtHit)
-      const { vx, vy, speed, dir, angleI } = bounceFixed(fState, paddleYI)
+      const { vx, vy, speed, dir } = bounceFixed(fState, paddleYI)
       fState.vx = vx
       fState.vy = vy
       fState.speed = speed
@@ -397,13 +370,6 @@ export async function runGame(canvas: HTMLCanvasElement) {
       state.vy = fromFixed(fState.vy)
       state.speed = fromFixed(fState.speed)
       state.dir = fState.dir
-      console.log('GAME bounce ' + JSON.stringify({
-        angleRad: angleI.toString(),
-        vx: fState.vx.toString(),
-        vy: fState.vy.toString(),
-        speed: fState.speed.toString(),
-        dir: fState.dir,
-      }))
       // Update state paddle positions for bookkeeping
       fState.leftY = toFixed(leftYAtHit)
       fState.rightY = toFixed(rightYAtHit)
@@ -415,7 +381,6 @@ export async function runGame(canvas: HTMLCanvasElement) {
       // Miss: score for the opponent
       if (movingLeft) state.rightScore++
       else state.leftScore++
-      console.log('GAME miss ' + JSON.stringify({ by: movingLeft ? 'LEFT' : 'RIGHT', leftScore: state.leftScore, rightScore: state.rightScore, rally: rallyId }))
       // End match?
       if (state.leftScore >= POINTS_TO_WIN || state.rightScore >= POINTS_TO_WIN) {
         state.ended = true
@@ -442,16 +407,6 @@ export async function runGame(canvas: HTMLCanvasElement) {
         ended: false,
       }
       rallyId++
-      console.log('GAME serve ' + JSON.stringify({
-        receiverDir: fState.dir,
-        t0: fState.t0.toString(),
-        vx: fState.vx.toString(),
-        vy: fState.vy.toString(),
-        speed: fState.speed.toString(),
-        leftScore: state.leftScore,
-        rightScore: state.rightScore,
-        rally: rallyId,
-      }))
       // On serve, set receiver target to intercept, other to center
       planTargetsForNextEventFix(fState, log.events.length)
     }
@@ -967,7 +922,6 @@ export async function validateLog(log: CompactLog): Promise<ValidateResult> {
       // This is unnecessary in JS/TS due to BigInt's arbitrary precision
       // The 10K event limit (enforced in Rust) prevents practical overflow anyway
       const yAtHit = ballYat(state, fromFixed(tHit))
-      const yAtHitI = reflect1D_fixed(state.y, state.vy, dtToPaddle, yMinI, yMaxI)
       const rawL = log.events[eventIdx * 2]
       const rawR = log.events[eventIdx * 2 + 1]
       const loggedLI: I = typeof rawL === 'string' ? (BigInt(rawL) as unknown as I) : toFixed(rawL)
@@ -1008,17 +962,6 @@ export async function validateLog(log: CompactLog): Promise<ValidateResult> {
       // Hit vs miss
       const half = PADDLE_HEIGHT / 2
       const hit = Math.abs((movingLeft ? fromFixed(loggedLI) : fromFixed(loggedRI)) - yAtHit) <= half + BALL_RADIUS
-      console.log('VALIDATE event ' + JSON.stringify({
-        idx: eventIdx,
-        dir: state.dir,
-        tHit: tHit.toString(),
-        dt: dtToPaddle.toString(),
-        yAtHit: yAtHitI.toString(),
-        loggedL: loggedLI.toString(),
-        loggedR: loggedRI.toString(),
-        hit,
-        rally: rallyId,
-      }))
 
       // Advance to tHit
       state.x = movingLeft ? iAdd(leftFaceI, ballRadiusI) : iSub(rightFaceI, ballRadiusI)
@@ -1043,7 +986,6 @@ export async function validateLog(log: CompactLog): Promise<ValidateResult> {
       } else {
         if (movingLeft) rightScore++
         else leftScore++
-        console.log('VALIDATE miss ' + JSON.stringify({ by: movingLeft ? 'LEFT' : 'RIGHT', leftScore, rightScore, rally: rallyId }))
         if (leftScore >= POINTS_TO_WIN || rightScore >= POINTS_TO_WIN) {
           ended = true
           break
@@ -1054,16 +996,6 @@ export async function validateLog(log: CompactLog): Promise<ValidateResult> {
         next.rightY = state.rightY
         state = next
         rallyId++
-        console.log('VALIDATE serve ' + JSON.stringify({
-          receiverDir: state.dir,
-          t0: state.t0.toString(),
-          vx: state.vx.toString(),
-          vy: state.vy.toString(),
-          speed: state.speed.toString(),
-          leftScore,
-          rightScore,
-          rally: rallyId,
-        }))
       }
 
       eventIdx++

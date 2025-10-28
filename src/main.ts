@@ -171,7 +171,6 @@ quickMatchBtn.onclick = async () => {
     }
 
     p2pClient.onGameEnd = (log) => {
-      console.log('[P2P] Received merged log from server:', log)
       currentLog = log
       logArea.value = formatLog(log)
       validateBtn.disabled = false
@@ -286,7 +285,6 @@ startBtn.onclick = async () => {
       if (state.ended) {
         // Send partial log to server for merging
         const partialLog = getLog()
-        console.log('[P2P] Game ended locally, sending partial log with', partialLog.events.length, 'events')
         sendPlayerLog(p2pClient!, partialLog)
         p2pStatusSpan.textContent = 'Game ended - waiting for merged log...'
         p2pStatusSpan.style.color = '#fa0'

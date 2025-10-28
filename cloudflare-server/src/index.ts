@@ -211,7 +211,7 @@ export class GameRoom extends DurableObject {
           break;
 
         default:
-          console.log('Unknown message type:', msg.type);
+          console.warn('Unknown message type:', msg.type);
       }
     } catch (err) {
       console.error('Error handling message:', err);
@@ -279,13 +279,6 @@ export class GameRoom extends DurableObject {
       // Event complete! Record it in canonical log
       this.events.push(this.pendingEvent.left);
       this.events.push(this.pendingEvent.right);
-
-      console.log(`[Server] Event ${msg.eventIndex} complete:`, {
-        left: this.pendingEvent.left,
-        right: this.pendingEvent.right,
-        totalEvents: this.events.length / 2,
-      });
-
       this.pendingEvent = null;
     }
 
@@ -310,21 +303,11 @@ export class GameRoom extends DurableObject {
       session.seed = msg.log.player_right_seed;
     }
 
-    console.log(`[Server] Received log from ${session.role} player:`, {
-      seed: session.seed?.slice(0, 16) + '...',
-      commitments: session.commitments.length,
-    });
-
     // Check if both players have submitted their seeds
     const players = Array.from(this.sessions.values());
     if (players.length === 2 && players.every((p) => p.seed)) {
       // Build final log using server's canonical events and players' commitments
       const finalLog = this.buildFinalLog(players);
-
-      console.log('[Server] Sending final log to both players:', {
-        events: finalLog.events.length,
-        commitments: finalLog.commitments.length,
-      });
 
       // Send final log to both players
       players.forEach((p) => {

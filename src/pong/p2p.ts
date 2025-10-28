@@ -89,14 +89,9 @@ export function createP2PClient(config: P2PConfig): P2PGameClient {
     onConnectionError: null,
   }
 
-  ws.onopen = () => {
-    console.log('[P2P] Connected to server')
-  }
-
   ws.onmessage = (event) => {
     try {
       const msg: ServerMessage = JSON.parse(event.data)
-      console.log('[P2P] Received:', msg.type, msg)
 
       switch (msg.type) {
         case 'game_start':
@@ -160,17 +155,14 @@ export function createP2PClient(config: P2PConfig): P2PGameClient {
   }
 
   ws.onclose = () => {
-    console.log('[P2P] Disconnected from server')
+    // Connection closed
   }
 
   return client
 }
 
 export function sendPlayerReady(client: P2PGameClient) {
-  if (!client.gameId) {
-    console.error('[P2P] Cannot send ready: no game ID')
-    return
-  }
+  if (!client.gameId) return
   client.ws.send(JSON.stringify({
     type: 'player_ready',
     gameId: client.gameId,
@@ -183,10 +175,7 @@ export function sendPaddlePosition(
   paddleY: string,
   commitment: string
 ) {
-  if (!client.role) {
-    console.error('[P2P] Cannot send paddle position: no role assigned')
-    return
-  }
+  if (!client.role) return
   client.ws.send(JSON.stringify({
     type: 'paddle_position',
     role: client.role,
