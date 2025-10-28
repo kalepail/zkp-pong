@@ -385,6 +385,8 @@ export async function runGame(canvas: HTMLCanvasElement) {
       if (state.leftScore >= POINTS_TO_WIN || state.rightScore >= POINTS_TO_WIN) {
         state.ended = true
         notify()
+        // Draw final frame with updated score
+        draw(performance.now() / 1000)
         return
       }
       // Serve toward the player who just received the point (the scorer)

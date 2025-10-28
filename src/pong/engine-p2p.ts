@@ -391,6 +391,9 @@ export async function runP2PGame(
         state.ended = true
         notify()
 
+        // Draw final frame with updated score
+        draw(performance.now() / 1000)
+
         // Send partial log to server for merging
         const partialLog = getLog()
         sendPlayerLog(p2pClient, partialLog)
